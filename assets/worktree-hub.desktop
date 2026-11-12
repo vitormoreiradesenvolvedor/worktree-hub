@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Worktree Hub
+GenericName=Git worktree orchestrator
+Comment=Liste, crie, remova e abra terminais em worktrees do git
+Exec=worktree-hub
+Icon=worktree-hub
+Terminal=false
+Categories=Development;RevisionControl;Utility;
+Keywords=git;worktree;branch;terminal;developer;
+StartupWMClass=worktree-hub

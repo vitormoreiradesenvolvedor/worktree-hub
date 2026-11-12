@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  push:
+    branches: [master, main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  appimage:
+    name: AppImage (x86_64)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Dependências de build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libgl1-mesa-dev libegl1-mesa-dev file
+      - run: ./scripts/build-appimage.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: dist/*.AppImage
+
+  windows:
+    name: Executável Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - name: Empacota
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item target/release/worktree-hub.exe dist/worktree-hub.exe
+          Compress-Archive -Path dist/worktree-hub.exe -DestinationPath dist/worktree-hub-windows-x86_64.zip -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/worktree-hub.exe
+            dist/worktree-hub-windows-x86_64.zip
+
+  release:
+    name: Publica release
+    needs: [appimage, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # Tag v*: a release oficial daquela versão.
+      - name: Release da versão
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/appimage/*.AppImage
+            artifacts/windows/worktree-hub.exe
+            artifacts/windows/worktree-hub-windows-x86_64.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+      # Commit na branch principal: a tag `latest` passa a apontar para ele e a
+      # pré-release do mesmo nome recebe os binários recém-compilados.
+      - name: Move a tag latest para este commit
+        if: github.ref_type == 'branch'
+        run: |
+          git tag -f latest
+          git push -f origin latest
+
+      - name: Release rolante (latest)
+        if: github.ref_type == 'branch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Build mais recente
+          prerelease: true
+          body: |
+            Binários compilados a partir de `${{ github.sha }}` (branch `${{ github.ref_name }}`).
+
+            Esta pré-release é sobrescrita a cada commit novo. Para uma versão
+            estável, use a release com número de versão.
+          files: |
+            artifacts/appimage/*.AppImage
+            artifacts/windows/worktree-hub.exe
+            artifacts/windows/worktree-hub-windows-x86_64.zip
+          fail_on_unmatched_files: true
