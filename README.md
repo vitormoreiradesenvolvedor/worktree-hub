@@ -7,6 +7,9 @@ terminais ao mesmo tempo, com poucos cliques.**
 
 Rust · egui · AppImage (Linux) · .exe (Windows)
 
+[![CI](https://github.com/vitormoreiradesenvolvedor/worktree-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/vitormoreiradesenvolvedor/worktree-hub/actions/workflows/ci.yml)
+[![Release](https://github.com/vitormoreiradesenvolvedor/worktree-hub/actions/workflows/release.yml/badge.svg)](https://github.com/vitormoreiradesenvolvedor/worktree-hub/actions/workflows/release.yml)
+
 </div>
 
 ![Tela de worktrees](docs/screenshot-worktrees.png)
@@ -48,11 +51,20 @@ Rust · egui · AppImage (Linux) · .exe (Windows)
 
 ## Instalar
 
+Os binários saem prontos do GitHub Actions, em
+[releases](https://github.com/vitormoreiradesenvolvedor/worktree-hub/releases):
+
+- [`latest`](https://github.com/vitormoreiradesenvolvedor/worktree-hub/releases/tag/latest)
+  — pré-release reconstruída a cada commit na `master`, sempre no estado mais
+  recente do código.
+- releases com número de versão (`v0.1.0`, …) — os builds estáveis, publicados
+  quando uma tag `v*` é criada.
+
 ### Linux (AppImage)
 
 ```bash
-chmod +x Worktree_Hub-0.1.0-x86_64.AppImage
-./Worktree_Hub-0.1.0-x86_64.AppImage
+chmod +x Worktree_Hub-*-x86_64.AppImage
+./Worktree_Hub-*-x86_64.AppImage
 ```
 
 ### Windows
