@@ -29,21 +29,10 @@ pub fn show(app: &mut App, ui: &mut Ui, actions: &mut Vec<Action>) {
     };
 
     // ---- header -----------------------------------------------------------
-    ui.horizontal(|ui| {
-        ui.vertical(|ui| {
-            c::heading(ui, &project.name);
-            ui.add_space(2.0);
-            c::truncated(
-                ui,
-                &project.root.to_string_lossy(),
-                12.0,
-                Weight::Regular,
-                t.text_dim,
-                520.0,
-            );
-        });
-
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+    c::header_row(
+        ui,
+        46.0,
+        |ui| {
             if c::Btn::primary(tr("wt.new"))
                 .icon(Icon::Plus)
                 .hint("Ctrl+N")
@@ -70,8 +59,20 @@ pub fn show(app: &mut App, ui: &mut Ui, actions: &mut Vec<Action>) {
             {
                 actions.push(Action::Prune);
             }
-        });
-    });
+        },
+        |ui, room| {
+            c::truncated_end(ui, &project.name, 20.0, Weight::SemiBold, t.text, room);
+            ui.add_space(2.0);
+            c::truncated(
+                ui,
+                &project.root.to_string_lossy(),
+                12.0,
+                Weight::Regular,
+                t.text_dim,
+                room,
+            );
+        },
+    );
 
     ui.add_space(theme::S4);
 

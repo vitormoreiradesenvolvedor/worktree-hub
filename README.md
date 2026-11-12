@@ -31,6 +31,11 @@ Rust · egui · AppImage (Linux) · .exe (Windows)
 - **Multiterminal estilo terminator**: marque várias worktrees nos checkboxes e
   abra todas em painéis lado a lado (grade, colunas, linhas, abas ou **livre**),
   com **espelhamento de digitação** para rodar o mesmo comando em todas de uma vez.
+- **Comandos salvos**: até três botões com nome e comando próprios, guardados na
+  configuração, que disparam o comando em todos os painéis de uma vez.
+- **Imagens no terminal**: o painel entende o protocolo gráfico do kitty, então
+  `fastfetch --logo-type kitty`, `kitten icat` e companhia desenham a figura no
+  meio do texto, e ela rola junto com o histórico.
 - **Layout livre com encaixe**: arraste o cabeçalho de um painel sobre outro e
   solte na borda onde ele deve entrar — os vizinhos se reacomodam sozinhos e a
   área nunca fica com buraco. Soltando perto da borda da área, o painel ocupa
@@ -102,7 +107,7 @@ worktree-hub --dump-icon icone.png 512        # exporta o ícone do app
 | Atalho | Ação |
 |---|---|
 | `Ctrl+N` | novo worktree |
-| `Ctrl+R` / `F5` | atualizar a lista |
+| `Ctrl+R` / `F5` | atualizar a lista (na tela de terminais, `Ctrl+R` é do shell) |
 | `Ctrl+Shift+T` | abrir multiterminal da seleção |
 | `Ctrl+Shift+W` | fechar o painel em foco |
 | `Ctrl+Shift+B` | ligar/desligar espelhamento de digitação |
@@ -132,6 +137,7 @@ no cabeçalho) para um painel ocupar tudo. **Organizar** redivide em partes igua
 | Idiomas | tabela estática ordenada em `src/i18n.rs` (busca binária, idioma atual em um atômico); chinês usa uma fonte CJK do sistema, que o app avisa quando não existe |
 | Git | chamadas ao `git` real (`worktree list --porcelain`, `status --porcelain=v2`, `for-each-ref`), sempre fora da thread de UI |
 | Terminal | um PTY por painel via `portable-pty` (ConPTY no Windows) com emulação VT do `alacritty_terminal`, renderizado célula a célula no egui |
+| Imagens | sequências do protocolo gráfico do kitty são lidas antes do emulador, decodificadas (PNG ou RGBA, com ou sem zlib) e desenhadas na linha do histórico onde chegaram |
 | Configuração | JSON em `~/.config/worktree-hub/config.json` |
 
 Sem Electron, sem webview: um binário só.
@@ -139,7 +145,7 @@ Sem Electron, sem webview: um binário só.
 ## Desenvolvimento
 
 ```bash
-cargo test            # 86 testes: parsing do git, atalhos de terminal, tiling, i18n, UI headless
+cargo test            # 94 testes: parsing do git, atalhos de terminal, imagens, tiling, i18n, UI headless
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all
 ```

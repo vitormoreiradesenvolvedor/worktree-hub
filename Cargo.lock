@@ -4116,6 +4116,8 @@ dependencies = [
  "directories",
  "eframe",
  "egui",
+ "image",
+ "miniz_oxide 0.9.1",
  "portable-pty",
  "serde",
  "serde_json",

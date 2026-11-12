@@ -1,6 +1,7 @@
 //! Embedded terminal: a real PTY per pane, parsed by `alacritty_terminal` and
 //! drawn with egui.
 
+pub mod images;
 pub mod keys;
 pub mod session;
 pub mod widget;

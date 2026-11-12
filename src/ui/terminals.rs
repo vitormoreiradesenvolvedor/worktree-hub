@@ -13,12 +13,14 @@ use super::components::{self as c, tokens};
 use super::icons::Icon;
 use super::tiles::{self, Dir, Side, Tile};
 use crate::app::{Action, App};
-use crate::config::PaneLayout;
+use crate::config::{self, PaneLayout};
 use crate::i18n::{tr, tr1};
 use crate::term::{TermTheme, show_terminal};
 use crate::theme::{self, Weight};
 
 const HEADER_H: f32 = 34.0;
+/// Height of the broadcast field, and of the icon beside it.
+const BROADCAST_H: f32 = 30.0;
 const GAP: f32 = 10.0;
 /// How long a pane takes to glide to its new place.
 const REFLOW: f32 = 0.13;
@@ -50,22 +52,10 @@ pub fn show(app: &mut App, ui: &mut Ui, actions: &mut Vec<Action>) {
     // ---- toolbar ----------------------------------------------------------
     let mut layout = app.cfg.settings.pane_layout;
     let free = layout == PaneLayout::Free;
-    let toolbar_w = ui.available_width();
-    ui.horizontal(|ui| {
-        ui.vertical(|ui| {
-            // The title block never takes more than its share, or the buttons
-            // on the right end up on top of each other.
-            ui.set_max_width((toolbar_w * 0.38).max(220.0));
-            c::heading(ui, tr("nav.terminals"));
-            let hint = if free {
-                tr("term.hint_free").to_owned()
-            } else {
-                tr1("term.hint", app.sessions.len())
-            };
-            c::muted(ui, hint);
-        });
-
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+    c::header_row(
+        ui,
+        46.0,
+        |ui| {
             let tight = ui.available_width() < 600.0;
             if c::Btn::ghost(tr("term.close_all"))
                 .icon(Icon::Close)
@@ -138,8 +128,24 @@ pub fn show(app: &mut App, ui: &mut Ui, actions: &mut Vec<Action>) {
                 Some(_) => actions.push(Action::ToggleFullscreen),
                 None => {}
             }
-        });
-    });
+        },
+        |ui, room| {
+            c::truncated_end(
+                ui,
+                tr("nav.terminals"),
+                20.0,
+                Weight::SemiBold,
+                t.text,
+                room,
+            );
+            let hint = if free {
+                tr("term.hint_free").to_owned()
+            } else {
+                tr1("term.hint", app.sessions.len())
+            };
+            c::truncated_end(ui, &hint, 12.5, Weight::Regular, t.text_dim, room);
+        },
+    );
 
     ui.add_space(theme::S3);
 
@@ -148,13 +154,22 @@ pub fn show(app: &mut App, ui: &mut Ui, actions: &mut Vec<Action>) {
         let width = ui.available_width();
         c::panel(ui, |ui| {
             ui.horizontal(|ui| {
-                let (rect, _) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
-                super::icons::paint(ui.painter(), rect, Icon::Broadcast, t.brand);
-                let response = c::text_field(
+                // Allocated as tall as the field: a 16px item placed first would
+                // stick to the top of the row once the field makes it taller.
+                let (rect, _) =
+                    ui.allocate_exact_size(Vec2::new(16.0, BROADCAST_H), Sense::hover());
+                super::icons::paint(
+                    ui.painter(),
+                    Rect::from_center_size(rect.center(), Vec2::splat(16.0)),
+                    Icon::Broadcast,
+                    t.brand,
+                );
+                let response = c::text_field_with(
                     ui,
                     &mut app.broadcast_input,
                     tr("term.broadcast_placeholder"),
                     width - 190.0,
+                    5,
                 );
                 let submit = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if (submit || c::Btn::primary(tr("term.send")).small().show(ui).clicked())
@@ -164,6 +179,8 @@ pub fn show(app: &mut App, ui: &mut Ui, actions: &mut Vec<Action>) {
                     app.broadcast_input.clear();
                 }
             });
+
+            quick_row(app, ui, actions);
         });
         ui.add_space(theme::S3);
     }
@@ -323,7 +340,11 @@ pub fn show(app: &mut App, ui: &mut Ui, actions: &mut Vec<Action>) {
             // on top of the name.
             let roomy = rect.width() > 300.0;
             let show_max = free && roomy;
-            let buttons_w = if show_max { 104.0 } else { 76.0 };
+            // Measured, not guessed: each icon button is 32 wide with S2 between
+            // them, plus the margin on the right and a gap before the text.
+            let icon_count = if show_max { 3.0 } else { 2.0 };
+            let buttons_w =
+                icon_count * 32.0 + (icon_count - 1.0) * theme::S2 + theme::S2 + theme::S3;
             let content = Rect::from_min_max(
                 Pos2::new(header.left() + theme::S3, header.top()),
                 Pos2::new(
@@ -609,6 +630,47 @@ fn drag_splitters(app: &mut App, ui: &mut Ui, area: Rect) {
 
 /// Moves `id` next to `target`, taking the room from the target's share. With
 /// no target the pane docks against the whole area and takes half of it.
+/// The saved commands: one button each, sending the command to every pane, plus
+/// a pencil to edit it. The first free slot shows an invitation to fill it.
+fn quick_row(app: &mut App, ui: &mut Ui, actions: &mut Vec<Action>) {
+    let saved: Vec<(usize, String, String)> = (0..config::QUICK_SLOTS)
+        .filter_map(|slot| {
+            app.cfg
+                .settings
+                .quick(slot)
+                .map(|quick| (slot, quick.label.clone(), quick.command.clone()))
+        })
+        .collect();
+    let free = (0..config::QUICK_SLOTS).find(|slot| app.cfg.settings.quick(*slot).is_none());
+
+    ui.add_space(theme::S2);
+    ui.horizontal_wrapped(|ui| {
+        for (slot, label, command) in saved {
+            if c::Btn::soft(&label)
+                .small()
+                .hint(&format!("{command}\n{}", tr("term.quick_run")))
+                .show(ui)
+                .clicked()
+            {
+                actions.push(Action::RunQuick(slot));
+            }
+            if c::icon_button(ui, Icon::Pencil, tr("term.quick_edit"), false).clicked() {
+                actions.push(Action::QuickDialog(slot));
+            }
+            ui.add_space(theme::S1);
+        }
+        if let Some(slot) = free
+            && c::Btn::ghost(tr("term.quick_add"))
+                .icon(Icon::Plus)
+                .small()
+                .show(ui)
+                .clicked()
+        {
+            actions.push(Action::QuickDialog(slot));
+        }
+    });
+}
+
 fn apply_drop(app: &mut App, id: u64, target: Option<u64>, side: Side) {
     let Some(mut tree) = app.tiles.take() else {
         return;

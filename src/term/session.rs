@@ -11,6 +11,8 @@ use alacritty_terminal::vte::ansi::{Processor, Rgb, StdSyncHandler};
 use anyhow::{Context as _, Result};
 use portable_pty::{Child, ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
+use super::images::{Album, Piece, Scanner, SharedAlbum};
+
 /// Terminal dimensions in cells.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TermSize {
@@ -192,6 +194,8 @@ pub struct TerminalSession {
     window_size: Arc<Mutex<WindowSize>>,
     bell: Arc<AtomicBool>,
     exited: Arc<AtomicBool>,
+    /// Pictures programs have drawn over this pane's grid.
+    pub images: SharedAlbum,
     /// Pending selection anchor while the user drags the mouse.
     pub selecting: bool,
     /// Font size for this pane alone, set with Ctrl+wheel.
@@ -267,7 +271,16 @@ impl TerminalSession {
         };
         let term = Arc::new(FairMutex::new(Term::new(config, &size, proxy)));
 
-        spawn_reader(reader, term.clone(), ctx.clone(), exited.clone());
+        let images: SharedAlbum = Arc::new(Mutex::new(Album::default()));
+        spawn_reader(Reader {
+            source: reader,
+            term: term.clone(),
+            ctx: ctx.clone(),
+            exited: exited.clone(),
+            images: images.clone(),
+            writer: writer.clone(),
+            window_size: window_size.clone(),
+        });
 
         Ok(Self {
             id,
@@ -286,6 +299,7 @@ impl TerminalSession {
             window_size,
             bell,
             exited,
+            images,
             selecting: false,
             font_size: None,
         })
@@ -382,31 +396,82 @@ impl Drop for TerminalSession {
     }
 }
 
-fn spawn_reader(
-    mut reader: Box<dyn Read + Send>,
+/// Everything the reader thread owns.
+struct Reader {
+    source: Box<dyn Read + Send>,
     term: Arc<FairMutex<Term<Proxy>>>,
     ctx: egui::Context,
     exited: Arc<AtomicBool>,
-) {
+    images: SharedAlbum,
+    writer: SharedWriter,
+    window_size: Arc<Mutex<WindowSize>>,
+}
+
+fn spawn_reader(mut reader: Reader) {
     std::thread::Builder::new()
         .name("worktree-hub-pty".into())
         .spawn(move || {
             let mut processor = Processor::<StdSyncHandler>::new();
+            let mut scanner = Scanner::default();
             let mut buf = [0u8; 65536];
             loop {
-                match reader.read(&mut buf) {
+                match reader.source.read(&mut buf) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
                         {
-                            let mut guard = term.lock();
-                            processor.advance(&mut *guard, &buf[..n]);
+                            let mut guard = reader.term.lock();
+                            for piece in scanner.feed(&buf[..n]) {
+                                match piece {
+                                    Piece::Bytes(bytes) => processor.advance(&mut *guard, &bytes),
+                                    Piece::Picture(picture) => {
+                                        // Dropped where the cursor stands right
+                                        // now, counted from the oldest line the
+                                        // scrollback still holds, so it travels
+                                        // with the text around it.
+                                        let grid = guard.grid();
+                                        let history =
+                                            grid.total_lines().saturating_sub(grid.screen_lines())
+                                                as i64;
+                                        let point = grid.cursor.point;
+                                        let line = history + point.line.0 as i64;
+                                        if let Ok(mut album) = reader.images.lock() {
+                                            album.place(&picture, line, point.column.0);
+                                        }
+                                        // The sender counts on the cursor coming
+                                        // out below the picture — the cell size
+                                        // it used is the one we reported to it.
+                                        let cell_h = reader
+                                            .window_size
+                                            .lock()
+                                            .map(|size| size.cell_height.max(1))
+                                            .unwrap_or(16)
+                                            as u32;
+                                        let rows = picture.height.div_ceil(cell_h);
+                                        let feed = b"\n".repeat(rows as usize);
+                                        processor.advance(&mut *guard, &feed);
+                                        if let Some(id) = picture.id {
+                                            // kitty's senders wait for this.
+                                            let reply = format!("\x1b_Gi={id};OK\x1b\\");
+                                            if let Ok(mut writer) = reader.writer.lock() {
+                                                let _ = writer.write_all(reply.as_bytes());
+                                                let _ = writer.flush();
+                                            }
+                                        }
+                                    }
+                                    Piece::Clear => {
+                                        if let Ok(mut album) = reader.images.lock() {
+                                            album.clear();
+                                        }
+                                    }
+                                }
+                            }
                         }
-                        ctx.request_repaint();
+                        reader.ctx.request_repaint();
                     }
                 }
             }
-            exited.store(true, Ordering::Relaxed);
-            ctx.request_repaint();
+            reader.exited.store(true, Ordering::Relaxed);
+            reader.ctx.request_repaint();
         })
         .expect("spawn pty reader thread");
 }

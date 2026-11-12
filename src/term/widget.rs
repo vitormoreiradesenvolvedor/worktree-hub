@@ -423,6 +423,34 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
     }
     flush(&mut run, &painter);
 
+    // Pictures programs dropped into the stream sit on top of the cells they
+    // cover and travel with the scrollback they landed in.
+    {
+        let album = session.images.clone();
+        if let Ok(mut album) = album.lock() {
+            let total = guard.grid().total_lines() as i64;
+            let history = total - guard.grid().screen_lines() as i64;
+            album.cull(history - total);
+            for placed in &mut album.items {
+                let row = placed.line - history + display_offset as i64;
+                if row + (placed.height / cell_h).ceil() as i64 <= 0 || row >= rows as i64 {
+                    continue;
+                }
+                let origin = Pos2::new(
+                    inner.min.x + placed.col as f32 * cell_w,
+                    inner.min.y + row as f32 * cell_h,
+                );
+                let texture = placed.texture(ui.ctx());
+                painter.image(
+                    texture.id(),
+                    Rect::from_min_size(origin, Vec2::new(placed.width, placed.height)),
+                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+            }
+        }
+    }
+
     // Cursor
     if mode.contains(TermMode::SHOW_CURSOR) && display_offset == 0 {
         let row_i = cursor_point.line.0;

@@ -111,12 +111,20 @@ pub struct DeleteForm {
     pub also_branch: bool,
 }
 
+/// Editing one of the saved broadcast buttons.
+pub struct QuickForm {
+    pub slot: usize,
+    pub label: String,
+    pub command: String,
+}
+
 pub enum Dialog {
     None,
     AddProject(ui::picker::Picker),
     Create(CreateForm),
     Delete(DeleteForm),
     RemoveProject(u64),
+    Quick(QuickForm),
 }
 
 impl Dialog {
@@ -158,6 +166,15 @@ pub enum Action {
     ToggleFullscreen,
     FocusPane(usize),
     Broadcast(String),
+    /// Sends the command saved in that slot to every pane.
+    RunQuick(usize),
+    /// Opens the editor for that slot.
+    QuickDialog(usize),
+    SaveQuick {
+        slot: usize,
+        label: String,
+        command: String,
+    },
     SubmitCreate,
     ConfirmDelete,
     CancelDialog,
@@ -643,6 +660,34 @@ impl App {
                     session.write(&bytes);
                 }
             }
+            Action::RunQuick(slot) => {
+                if let Some(quick) = self.cfg.settings.quick(slot) {
+                    let mut bytes = quick.command.clone().into_bytes();
+                    bytes.push(b'\r');
+                    for session in &self.sessions {
+                        session.write(&bytes);
+                    }
+                }
+            }
+            Action::QuickDialog(slot) => {
+                let saved = self.cfg.settings.quick(slot);
+                self.dialog = Dialog::Quick(QuickForm {
+                    slot,
+                    label: saved.map(|q| q.label.clone()).unwrap_or_default(),
+                    command: saved.map(|q| q.command.clone()).unwrap_or_default(),
+                });
+            }
+            Action::SaveQuick {
+                slot,
+                label,
+                command,
+            } => {
+                self.cfg.settings.set_quick(slot, &label, &command);
+                self.dialog = Dialog::None;
+                if let Err(err) = self.cfg.save() {
+                    self.toast(format!("{err}"), ToastKind::Error);
+                }
+            }
             Action::SubmitCreate => self.submit_create(ctx),
             Action::ConfirmDelete => self.confirm_delete(ctx),
             Action::CancelDialog => self.dialog = Dialog::None,
@@ -793,7 +838,12 @@ impl App {
         if hit(ctx, Modifiers::COMMAND, Key::N) {
             actions.push(Action::CreateDialog);
         }
-        if hit(ctx, Modifiers::COMMAND, Key::R) || hit(ctx, Modifiers::NONE, Key::F5) {
+        // On the terminals screen Ctrl+R belongs to the shell (reverse-i-search);
+        // F5 still refreshes from anywhere.
+        let in_terminals = self.screen == Screen::Terminals;
+        if (!in_terminals && hit(ctx, Modifiers::COMMAND, Key::R))
+            || hit(ctx, Modifiers::NONE, Key::F5)
+        {
             actions.push(Action::Refresh);
         }
         if hit(ctx, Modifiers::COMMAND | Modifiers::SHIFT, Key::T) {

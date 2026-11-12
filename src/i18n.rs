@@ -144,9 +144,15 @@ static TABLE: &[Row] = &[
     ("dlg.not_repo", ["this folder is not a git repository", "esta pasta não é um repositório git", "это не git-репозиторий", "该文件夹不是 git 仓库"]),
     ("dlg.open_terminal", ["Open terminal after creating", "Abrir terminal ao criar", "Открыть терминал после создания", "创建后打开终端"]),
     ("dlg.path", ["Worktree folder", "Pasta do worktree", "Папка рабочего дерева", "工作树文件夹"]),
+    ("dlg.quick_command", ["Command", "Comando", "Команда", "命令"]),
+    ("dlg.quick_hint", ["Sent to every open pane, as if you had typed it and pressed Enter.", "Enviado para todos os painéis abertos, como se você tivesse digitado e dado Enter.", "Отправляется во все открытые панели, как будто вы набрали это и нажали Enter.", "发送到所有打开的面板，就像你输入后按下回车。"]),
+    ("dlg.quick_label", ["Button name", "Nome do botão", "Название кнопки", "按钮名称"]),
+    ("dlg.quick_sub", ["A button in the mirroring bar that sends this command to every pane", "Um botão na barra de espelhamento que manda este comando para todos os painéis", "Кнопка в панели дублирования, отправляющая команду во все панели", "镜像栏中的按钮，把这条命令发给所有面板"]),
+    ("dlg.quick_title", ["Saved command", "Comando salvo", "Сохранённая команда", "保存的命令"]),
     ("dlg.remove", ["Remove", "Remover", "Удалить", "删除"]),
     ("dlg.remove_project_sub", ["Only the app forgets it: nothing is deleted from disk", "Só o app esquece: nada é apagado do disco", "Приложение просто забудет его: с диска ничего не удаляется", "只是应用不再记住它：磁盘上不会删除任何内容"]),
     ("dlg.remove_project_title", ["Remove project from the list", "Remover projeto da lista", "Убрать проект из списка", "从列表中移除项目"]),
+    ("dlg.save", ["Save", "Salvar", "Сохранить", "保存"]),
     ("dlg.track", ["Track the origin", "Rastrear a origem", "Отслеживать origin", "跟踪远程分支"]),
     ("dlg.track_hint", ["Adds --track when creating the branch", "Adiciona --track à criação da branch", "Добавляет --track при создании ветки", "创建分支时加上 --track"]),
     ("dlg.up", ["Folder above", "Pasta acima", "На уровень выше", "上一级文件夹"]),
@@ -247,6 +253,9 @@ static TABLE: &[Row] = &[
     ("term.maximize", ["Maximize this pane", "Maximizar este painel", "Развернуть панель", "最大化此面板"]),
     ("term.mirror", ["Mirror typing", "Espelhar digitação", "Дублировать ввод", "同步输入"]),
     ("term.mirror_hint", ["With this on, what you type in the focused pane goes to all the others (Ctrl+Shift+B)", "Com isso ligado, o que você digita no painel em foco vai para todos os outros (Ctrl+Shift+B)", "Когда включено, набранное в активной панели уходит во все остальные (Ctrl+Shift+B)", "开启后，在当前面板输入的内容会发送到其他所有面板 (Ctrl+Shift+B)"]),
+    ("term.quick_add", ["Save a command", "Salvar um comando", "Сохранить команду", "保存命令"]),
+    ("term.quick_edit", ["Edit this command", "Editar este comando", "Изменить команду", "编辑此命令"]),
+    ("term.quick_run", ["Send to every pane", "Enviar para todos os painéis", "Отправить во все панели", "发送到所有面板"]),
     ("term.repo_tooltip", ["Repository folder, not a worktree", "Pasta do repositório, não um worktree", "Папка репозитория, а не рабочее дерево", "仓库文件夹，不是工作树"]),
     ("term.restart", ["Restart shell", "Reiniciar shell", "Перезапустить оболочку", "重启 shell"]),
     ("term.restore", ["Put the pane back", "Devolver o painel ao lugar", "Вернуть панель на место", "还原面板"]),
@@ -331,8 +340,14 @@ mod tests {
         }
     }
 
+    /// The current language is global, so the tests that switch it take turns.
+    static LANGUAGE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn translation_follows_the_language() {
+        let _turn = LANGUAGE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         set_lang(Lang::En);
         assert_eq!(tr("nav.settings"), "Settings");
         set_lang(Lang::Pt);
@@ -346,6 +361,9 @@ mod tests {
 
     #[test]
     fn placeholders_are_filled() {
+        let _turn = LANGUAGE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         set_lang(Lang::En);
         assert_eq!(tr1("msg.added", "repo"), "repo added");
         assert_eq!(

@@ -300,6 +300,61 @@ pub fn show(app: &mut App, ctx: &egui::Context, actions: &mut Vec<Action>) {
                 });
             }
 
+            Dialog::Quick(form) => {
+                title(ui, tr("dlg.quick_title"), tr("dlg.quick_sub"));
+                ui.add_space(theme::S4);
+
+                field_label(ui, tr("dlg.quick_label"));
+                c::text_field(ui, &mut form.label, "build", ui.available_width());
+
+                ui.add_space(theme::S3);
+                field_label(ui, tr("dlg.quick_command"));
+                c::text_field(
+                    ui,
+                    &mut form.command,
+                    "git status -sb",
+                    ui.available_width(),
+                );
+
+                ui.add_space(theme::S2);
+                c::muted(ui, tr("dlg.quick_hint"));
+
+                ui.add_space(theme::S4);
+                let filled = !form.command.trim().is_empty();
+                ui.horizontal(|ui| {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if c::Btn::primary(tr("dlg.save"))
+                            .icon(Icon::Check)
+                            .enabled(filled)
+                            .show(ui)
+                            .clicked()
+                        {
+                            actions.push(Action::SaveQuick {
+                                slot: form.slot,
+                                label: form.label.clone(),
+                                command: form.command.clone(),
+                            });
+                        }
+                        if c::Btn::ghost(tr("dlg.cancel")).show(ui).clicked() {
+                            close_requested = true;
+                        }
+                        if filled
+                            && c::Btn::danger(tr("dlg.remove"))
+                                .icon(Icon::Trash)
+                                .show(ui)
+                                .clicked()
+                        {
+                            // An empty command clears the slot.
+                            actions.push(Action::SaveQuick {
+                                slot: form.slot,
+                                label: String::new(),
+                                command: String::new(),
+                            });
+                        }
+                    });
+                });
+            }
+
             Dialog::None => {}
         }
     });

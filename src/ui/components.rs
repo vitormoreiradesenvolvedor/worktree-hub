@@ -464,6 +464,18 @@ pub fn dot_label(ui: &mut Ui, color: Color32, text: &str) {
 // -------------------------------------------------------------------- inputs
 
 pub fn text_field(ui: &mut Ui, value: &mut String, placeholder: &str, width: f32) -> Response {
+    text_field_with(ui, value, placeholder, width, 9)
+}
+
+/// Same field with the padding above and below the text under your control:
+/// `pad_y` of 9 gives the standard 38px row, 5 gives a compact 30px one.
+pub fn text_field_with(
+    ui: &mut Ui,
+    value: &mut String,
+    placeholder: &str,
+    width: f32,
+    pad_y: i8,
+) -> Response {
     let t = tokens(ui);
     let desired = if width > 0.0 {
         width
@@ -474,7 +486,7 @@ pub fn text_field(ui: &mut Ui, value: &mut String, placeholder: &str, width: f32
         .fill(t.surface_alt)
         .stroke(Stroke::new(1.0, t.border))
         .corner_radius(CornerRadius::same(theme::R_INPUT))
-        .inner_margin(egui::Margin::symmetric(theme::S3 as i8, 9))
+        .inner_margin(egui::Margin::symmetric(theme::S3 as i8, pad_y))
         .show(ui, |ui| {
             ui.add_sized(
                 Vec2::new(desired - 2.0 * theme::S3, 20.0),
@@ -904,6 +916,48 @@ pub fn icon_bar(ui: &mut Ui, items: &[(Icon, &str)]) -> Option<usize> {
     }
 
     clicked
+}
+
+/// A screen header: the buttons are laid out at the right edge first and the
+/// title block gets exactly what is left over, so a long name or path is cut
+/// instead of sliding under them. The title closure is handed that room.
+pub fn header_row(
+    ui: &mut Ui,
+    height: f32,
+    buttons: impl FnOnce(&mut Ui),
+    title: impl FnOnce(&mut Ui, f32),
+) {
+    let available = ui.available_rect_before_wrap();
+    let row = Rect::from_min_size(available.min, Vec2::new(available.width(), height));
+
+    let mut left = row.right();
+    {
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(row)
+                .layout(Layout::right_to_left(Align::Center)),
+        );
+        buttons(&mut child);
+        if child.min_rect().width() > 0.0 {
+            left = child.min_rect().left();
+        }
+    }
+
+    // Below this there is no room left for a readable title, and the buttons
+    // keep the whole row to themselves.
+    const MIN_TITLE: f32 = 90.0;
+    let room = (left - row.left() - theme::S3).max(0.0);
+    if room >= MIN_TITLE {
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(Rect::from_min_size(row.min, Vec2::new(room, height)))
+                .layout(Layout::top_down(Align::Min)),
+        );
+        child.set_max_width(room);
+        title(&mut child, room);
+    }
+
+    ui.allocate_rect(row, Sense::hover());
 }
 
 // ------------------------------------------------------------------- helpers

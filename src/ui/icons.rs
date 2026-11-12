@@ -35,6 +35,7 @@ pub enum Icon {
     External,
     Dot,
     Home,
+    Pencil,
 }
 
 pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
@@ -305,6 +306,18 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 p(0.78, 0.86),
                 p(0.78, 0.44),
             ]);
+        }
+        Icon::Pencil => {
+            // Nib pointing at the lower left, body running to the upper right.
+            path(vec![
+                p(0.18, 0.82),
+                p(0.30, 0.78),
+                p(0.82, 0.26),
+                p(0.70, 0.14),
+                p(0.18, 0.66),
+                p(0.18, 0.82),
+            ]);
+            line(p(0.60, 0.24), p(0.72, 0.36));
         }
     }
 }

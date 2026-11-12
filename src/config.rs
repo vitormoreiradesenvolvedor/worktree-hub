@@ -56,7 +56,20 @@ pub struct Settings {
     pub pane_layout: PaneLayout,
     /// Left rail folded down to icons only.
     pub sidebar_collapsed: bool,
+    /// Up to three commands kept at hand, sent to every pane with one click.
+    pub quick_commands: Vec<QuickCommand>,
 }
+
+/// A button the user saves: a short name and the command it sends.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct QuickCommand {
+    pub label: String,
+    pub command: String,
+}
+
+/// How many of them fit in the broadcast bar.
+pub const QUICK_SLOTS: usize = 3;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -78,11 +91,45 @@ impl Default for Settings {
             show_clean_status: true,
             pane_layout: PaneLayout::Grid,
             sidebar_collapsed: false,
+            quick_commands: Vec::new(),
         }
     }
 }
 
 impl Settings {
+    /// The saved command in that slot, if the slot was filled in.
+    pub fn quick(&self, slot: usize) -> Option<&QuickCommand> {
+        self.quick_commands
+            .get(slot)
+            .filter(|q| !q.command.trim().is_empty())
+    }
+
+    /// Writes a slot, growing the list up to [`QUICK_SLOTS`]; an empty command
+    /// clears the slot instead.
+    pub fn set_quick(&mut self, slot: usize, label: &str, command: &str) {
+        if slot >= QUICK_SLOTS {
+            return;
+        }
+        if self.quick_commands.len() < QUICK_SLOTS {
+            self.quick_commands
+                .resize(QUICK_SLOTS, QuickCommand::default());
+        }
+        let label = label.trim();
+        let command = command.trim();
+        self.quick_commands[slot] = if command.is_empty() {
+            QuickCommand::default()
+        } else {
+            QuickCommand {
+                label: if label.is_empty() {
+                    command.to_owned()
+                } else {
+                    label.to_owned()
+                },
+                command: command.to_owned(),
+            }
+        };
+    }
+
     pub fn look(&self) -> Look {
         Look {
             mode: self.theme,
@@ -227,6 +274,34 @@ pub fn suggest_path(project: &Project, branch: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_saved_command_takes_the_command_as_its_name_when_none_is_given() {
+        let mut settings = Settings::default();
+        settings.set_quick(0, "  ", " git status -sb ");
+        let saved = settings.quick(0).expect("slot 0 was not filled");
+        assert_eq!(saved.label, "git status -sb");
+        assert_eq!(saved.command, "git status -sb");
+    }
+
+    #[test]
+    fn an_empty_command_clears_the_slot_and_leaves_the_others_alone() {
+        let mut settings = Settings::default();
+        settings.set_quick(0, "build", "cargo build");
+        settings.set_quick(1, "test", "cargo test");
+        settings.set_quick(0, "build", "   ");
+        assert!(settings.quick(0).is_none());
+        assert_eq!(settings.quick(1).unwrap().command, "cargo test");
+    }
+
+    #[test]
+    fn there_is_no_fourth_slot() {
+        let mut settings = Settings::default();
+        settings.set_quick(QUICK_SLOTS, "nope", "rm -rf /");
+        assert_eq!(settings.quick_commands.len(), 0);
+        settings.set_quick(2, "last", "echo last");
+        assert_eq!(settings.quick_commands.len(), QUICK_SLOTS);
+    }
 
     fn project() -> Project {
         Project {
