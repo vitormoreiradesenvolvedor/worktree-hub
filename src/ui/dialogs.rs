@@ -458,10 +458,8 @@ fn editor_picker(
         });
         return false;
     }
-    if close || response.should_close() {
-        return false;
-    }
-    true
+    // The picker stays open until something closes it.
+    !(close || response.should_close())
 }
 
 /// One application in the menu: its picture over its name.
