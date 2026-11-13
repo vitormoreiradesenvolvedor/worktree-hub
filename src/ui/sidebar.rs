@@ -60,6 +60,10 @@ fn rail(app: &App, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
     if rail_item(ui, Icon::ChevronRight, false, None, tr("nav.expand")).clicked() {
         actions.push(Action::ToggleSidebar);
     }
+    let (icon, hint) = fullscreen_look(app.fullscreen);
+    if rail_item(ui, icon, app.fullscreen, None, hint).clicked() {
+        actions.push(Action::ToggleFullscreen);
+    }
     ui.add_space(theme::S2);
     c::divider(ui);
     ui.add_space(theme::S2);
@@ -161,9 +165,7 @@ fn rail_item(
 }
 
 fn full(app: &App, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
-    if header(ui) {
-        actions.push(Action::ToggleSidebar);
-    }
+    header(app, ui, actions);
 
     ui.add_space(theme::S4);
     ui.horizontal(|ui| {
@@ -286,31 +288,29 @@ fn full(app: &App, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
 }
 
 /// Returns true when the user asked to fold the sidebar.
-fn header(ui: &mut egui::Ui) -> bool {
+fn header(app: &App, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
     let t = tokens(ui);
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 112.0), Sense::hover());
     c::gradient_header(ui, rect);
 
+    // Fold and fullscreen sit together at the top: both belong to the window,
+    // not to whatever screen happens to be open.
     let fold = Rect::from_center_size(
         Pos2::new(rect.right() - theme::S4 - 2.0, rect.top() + theme::S4 + 6.0),
         Vec2::splat(26.0),
     );
-    let fold_response = ui
-        .interact(fold, ui.scope_id().with("fold"), Sense::click())
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text(tr("nav.collapse"));
-    ui.painter().rect_filled(
-        fold,
-        CornerRadius::same(theme::R_PILL),
-        Color32::from_white_alpha(if fold_response.hovered() { 60 } else { 28 }),
+    if round_button(ui, fold, Icon::ChevronLeft, "fold", tr("nav.collapse")).clicked() {
+        actions.push(Action::ToggleSidebar);
+    }
+    let (icon, hint) = fullscreen_look(app.fullscreen);
+    let full_rect = Rect::from_center_size(
+        Pos2::new(fold.center().x - 26.0 - theme::S1, fold.center().y),
+        Vec2::splat(26.0),
     );
-    icons::paint(
-        ui.painter(),
-        fold.shrink(7.0),
-        Icon::ChevronLeft,
-        Color32::WHITE,
-    );
+    if round_button(ui, full_rect, icon, "fullscreen", hint).clicked() {
+        actions.push(Action::ToggleFullscreen);
+    }
 
     let painter = ui.painter();
     let mark = Rect::from_center_size(
@@ -335,7 +335,30 @@ fn header(ui: &mut egui::Ui) -> bool {
         Color32::from_white_alpha(170),
     );
     let _ = t;
-    fold_response.clicked()
+}
+
+/// Icon and hint for the fullscreen toggle, in both of its states.
+fn fullscreen_look(on: bool) -> (Icon, &'static str) {
+    if on {
+        (Icon::Shrink, tr("term.fullscreen_off"))
+    } else {
+        (Icon::Expand, tr("term.fullscreen"))
+    }
+}
+
+/// Small translucent circle over the brand header.
+fn round_button(ui: &mut egui::Ui, rect: Rect, icon: Icon, id: &str, hint: &str) -> egui::Response {
+    let response = ui
+        .interact(rect, ui.scope_id().with(id), Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(hint);
+    ui.painter().rect_filled(
+        rect,
+        CornerRadius::same(theme::R_PILL),
+        Color32::from_white_alpha(if response.hovered() { 60 } else { 28 }),
+    );
+    icons::paint(ui.painter(), rect.shrink(7.0), icon, Color32::WHITE);
+    response
 }
 
 fn nav_item(

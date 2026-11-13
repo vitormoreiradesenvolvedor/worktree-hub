@@ -131,7 +131,7 @@ worktree-hub --dump-icon icone.png 512        # exporta o ícone do app
 | `Ctrl+Shift+W` | fechar o painel em foco |
 | `Ctrl+Shift+B` | ligar/desligar espelhamento de digitação |
 | `F9` | recolher/abrir a barra lateral |
-| `F11` | tela cheia |
+| `F11` | tela cheia (também no botão ao lado do nome, em qualquer tela) |
 | `Ctrl+C` | interrompe o programa do terminal (SIGINT), como em qualquer terminal |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | copiar / colar dentro do terminal |
 | `Ctrl+Shift+↑` `↓` `PageUp` `PageDown` | rolar o histórico do terminal |
