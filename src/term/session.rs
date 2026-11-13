@@ -179,6 +179,14 @@ pub struct SpawnSpec<'a> {
     pub size: TermSize,
 }
 
+/// What the screen looked like before a notch was sent, so the answer can be
+/// measured against it.
+pub struct ScrollProbe {
+    pub before: Vec<u64>,
+    pub notches: i32,
+    pub frames: u8,
+}
+
 pub struct TerminalSession {
     pub id: u64,
     /// Worktree name, shown in the pane header.
@@ -209,6 +217,17 @@ pub struct TerminalSession {
     /// True while a press reported to the program has not been released yet,
     /// so the release reaches it even if the pointer wandered off.
     pub mouse_claimed: bool,
+    /// Hash of each visible row, kept from the last frame so the strip can see
+    /// how far a program scrolled when it was told to.
+    pub rows_hash: Vec<u64>,
+    /// A drag of the strip waiting to find out what it caused.
+    pub scroll_probe: Option<ScrollProbe>,
+    /// How many lines this program moves for one notch of the wheel. Measured
+    /// while dragging, because every program picks its own number.
+    pub scroll_gain: f32,
+    /// Where the handle of the scroll strip sits while it is being dragged, so
+    /// it stays under the pointer instead of hanging in the middle.
+    pub bar_grab: Option<f32>,
     /// Leftover of a drag on the scroll strip, in pixels, so a slow drag still
     /// adds up to whole lines.
     pub bar_rest: f32,
@@ -334,6 +353,10 @@ impl TerminalSession {
             images,
             selecting: false,
             mouse_claimed: false,
+            rows_hash: Vec::new(),
+            scroll_probe: None,
+            scroll_gain: 1.0,
+            bar_grab: None,
             bar_rest: 0.0,
             mouse_cell: None,
             font_size: None,

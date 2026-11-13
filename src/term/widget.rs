@@ -1,6 +1,7 @@
 //! Renders a `TerminalSession` and feeds it keyboard/mouse input.
 
 use super::mouse;
+use super::session::ScrollProbe;
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
@@ -220,13 +221,50 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
     // jump to: the strip turns into a wheel instead, a line per cell dragged,
     // which is the precise scrolling a pointer wheel cannot give.
     if reporting && history == 0 {
+        // How much did the last push of the wheel actually move? Programs
+        // scroll one, three or any number of lines per notch, and the strip is
+        // only honest if it knows which.
+        if let Some(probe) = session.scroll_probe.as_mut() {
+            probe.frames = probe.frames.saturating_add(1);
+            match shift_between(&probe.before, &session.rows_hash) {
+                Some(shift) if probe.notches != 0 => {
+                    let measured =
+                        (shift.abs() as f32 / probe.notches.abs() as f32).clamp(0.2, 8.0);
+                    // Half of the new reading, so one odd frame cannot throw
+                    // the feel of the strip off.
+                    session.scroll_gain = (session.scroll_gain + measured) / 2.0;
+                    session.scroll_probe = None;
+                }
+                _ if probe.frames > 8 => session.scroll_probe = None,
+                _ => {}
+            }
+        }
         if bar.drag_stopped() {
             session.bar_rest = 0.0;
+            session.bar_grab = None;
         }
-        session.bar_rest += bar.drag_delta().y;
-        let notches = (session.bar_rest / cell_h).trunc();
+        // The handle is moved by the pointer itself, not by a delta of its
+        // own: whatever the program does with the lines, the thing under the
+        // finger goes exactly where the finger goes.
+        let pointer_y = bar.interact_pointer_pos().map(|pos| pos.y);
+        if bar.drag_started() {
+            session.bar_rest = 0.0;
+            session.bar_grab = pointer_y;
+        }
+        let moved = match (bar.dragged(), pointer_y, session.bar_grab) {
+            (true, Some(now), Some(before)) => {
+                session.bar_grab = Some(now);
+                now - before
+            }
+            _ => 0.0,
+        };
+        session.bar_rest += moved;
+        // One line of text per line of pointer travel, whatever the program
+        // does with a notch.
+        let step = cell_h * session.scroll_gain.clamp(0.2, 8.0);
+        let notches = (session.bar_rest / step).trunc();
         if notches != 0.0 {
-            session.bar_rest -= notches * cell_h;
+            session.bar_rest -= notches * step;
             let button = if notches < 0.0 {
                 mouse::Button::WheelUp
             } else {
@@ -241,17 +279,22 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
             // edge of the window and programs tend to drop events there,
             // while the middle is always inside what they draw.
             let col = (cols / 2).max(1);
-            let row = bar
-                .interact_pointer_pos()
-                .map(|pos| {
-                    (((pos.y - inner.min.y) / cell_h).floor().max(0.0) as usize).min(rows - 1) + 1
-                })
+            let row = pointer_y
+                .map(|y| (((y - inner.min.y) / cell_h).floor().max(0.0) as usize).min(rows - 1) + 1)
                 .unwrap_or(rows / 2 + 1);
-            for _ in 0..(notches.abs() as usize).min(20) {
+            let count = (notches.abs() as usize).min(20);
+            for _ in 0..count {
                 if let Some(bytes) = mouse::report(mode, button, mouse::Kind::Press, col, row, mods)
                 {
                     private.extend_from_slice(&bytes);
                 }
+            }
+            if session.scroll_probe.is_none() && !session.rows_hash.is_empty() {
+                session.scroll_probe = Some(ScrollProbe {
+                    before: session.rows_hash.clone(),
+                    notches: count as i32,
+                    frames: 0,
+                });
             }
         }
     } else if history > 0
@@ -508,6 +551,7 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
         }
     };
 
+    let mut hashes = vec![0u64; rows];
     for indexed in guard.grid().display_iter() {
         let point = indexed.point;
         let cell = indexed.cell;
@@ -520,6 +564,12 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
         if row >= rows || col >= cols {
             continue;
         }
+        // Cheap fingerprint of the line, enough to recognise it again a few
+        // rows higher or lower.
+        hashes[row] = hashes[row]
+            .wrapping_mul(31)
+            .wrapping_add(cell.c as u64)
+            .wrapping_add(col as u64);
 
         let flags = cell.flags;
         if flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
@@ -633,9 +683,17 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
             CornerRadius::same(2),
             t.fg.gamma_multiply(if lit { 0.22 } else { 0.08 }),
         );
+        // While dragging it rides the pointer; at rest it waits in the middle,
+        // since the program never says where its history stands.
+        const HANDLE_H: f32 = 48.0;
+        let middle = bar_track.center().y;
+        let y = session.bar_grab.unwrap_or(middle).clamp(
+            bar_track.top() + HANDLE_H / 2.0,
+            bar_track.bottom() - HANDLE_H / 2.0,
+        );
         let handle = Rect::from_center_size(
-            Pos2::new(bar_track.center().x, bar_track.center().y),
-            Vec2::new(bar_track.width(), 48.0),
+            Pos2::new(bar_track.center().x, y),
+            Vec2::new(bar_track.width(), HANDLE_H),
         );
         painter.rect_filled(
             handle,
@@ -674,6 +732,7 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
     }
 
     drop(guard);
+    session.rows_hash = hashes;
 
     if !pending.is_empty() {
         session.write(&pending);
@@ -687,6 +746,46 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
         sent: pending,
         zoom,
     }
+}
+
+/// How many rows the screen moved between two fingerprints, or `None` when the
+/// two do not look like the same text at all — a clock ticking in a corner is
+/// fine, a whole new screen is not.
+fn shift_between(before: &[u64], now: &[u64]) -> Option<i32> {
+    if before.len() != now.len() || before.len() < 4 {
+        return None;
+    }
+    let rows = before.len() as i32;
+    let reach = (rows - 2).min(24);
+    let mut best: Option<(i32, usize)> = None;
+    for shift in -reach..=reach {
+        if shift == 0 {
+            continue;
+        }
+        let mut matched = 0usize;
+        let mut compared = 0usize;
+        for row in 0..rows {
+            let other = row + shift;
+            if other < 0 || other >= rows {
+                continue;
+            }
+            // Blank lines match everything, so they say nothing about the move.
+            if before[other as usize] == 0 {
+                continue;
+            }
+            compared += 1;
+            if now[row as usize] == before[other as usize] {
+                matched += 1;
+            }
+        }
+        if compared < 3 || matched * 10 < compared * 7 {
+            continue;
+        }
+        if best.is_none_or(|(_, seen)| matched > seen) {
+            best = Some((shift, matched));
+        }
+    }
+    best.map(|(shift, _)| shift)
 }
 
 fn paint_cursor(
@@ -912,5 +1011,31 @@ mod tests {
             &colors,
         );
         assert_eq!(fg, bg);
+    }
+}
+
+#[cfg(test)]
+mod scroll_tests {
+    use super::shift_between;
+
+    #[test]
+    fn a_screen_that_slid_up_reports_how_far() {
+        let before: Vec<u64> = (1..=20).collect();
+        let now: Vec<u64> = (4..=23).collect();
+        assert_eq!(shift_between(&before, &now), Some(3));
+    }
+
+    #[test]
+    fn a_screen_that_slid_down_reports_a_negative_move() {
+        let before: Vec<u64> = (10..=29).collect();
+        let now: Vec<u64> = (8..=27).collect();
+        assert_eq!(shift_between(&before, &now), Some(-2));
+    }
+
+    #[test]
+    fn a_screen_replaced_by_another_is_not_a_move() {
+        let before: Vec<u64> = (1..=20).collect();
+        let now: Vec<u64> = (1..=20).map(|n| n * 977 + 13).collect();
+        assert_eq!(shift_between(&before, &now), None);
     }
 }

@@ -43,8 +43,10 @@ Rust · egui · AppImage (Linux) · .exe (Windows)
   ponteiro vale onde está — rolar sobre a conversa rola a conversa, fechar um
   painel do programa fecha aquele painel, e as divisões dele dão para arrastar.
   Segurando **Shift** o mouse volta a ser do terminal, para selecionar texto.
-  Na borda direita do painel aparece uma **régua de rolagem**: arrastá-la manda
-  uma linha por célula percorrida, que é a precisão que a roda não dá.
+  Na borda direita do painel aparece uma **régua de rolagem**: a alça anda
+  exatamente com o ponteiro e o texto anda junto, uma linha por linha
+  arrastada — o painel mede quantas linhas aquele programa move por entalhe da
+  roda (1 no `less`, 3 no vim) e acerta o passo sozinho.
 - **Imagens no terminal**: o painel entende o protocolo gráfico do kitty, então
   `fastfetch --logo-type kitty`, `kitten icat` e companhia desenham a figura no
   meio do texto, e ela rola junto com o histórico. Os painéis ainda ganham um
