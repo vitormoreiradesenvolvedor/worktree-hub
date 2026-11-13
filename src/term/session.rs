@@ -206,6 +206,9 @@ pub struct TerminalSession {
     pub images: SharedAlbum,
     /// Pending selection anchor while the user drags the mouse.
     pub selecting: bool,
+    /// Last cell reported to a program that asked for the mouse, so a move is
+    /// only sent when the pointer actually changes cell.
+    pub mouse_cell: Option<(usize, usize)>,
     /// Font size for this pane alone, set with Ctrl+wheel.
     pub font_size: Option<f32>,
 }
@@ -324,6 +327,7 @@ impl TerminalSession {
             exited,
             images,
             selecting: false,
+            mouse_cell: None,
             font_size: None,
         })
     }

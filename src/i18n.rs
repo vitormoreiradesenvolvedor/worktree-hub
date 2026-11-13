@@ -201,6 +201,7 @@ static TABLE: &[Row] = &[
     ("sc.font", ["change the font size of the pane", "mudar o tamanho da fonte do painel", "изменить размер шрифта панели", "改变面板字号"]),
     ("sc.fullscreen", ["fullscreen", "tela cheia", "полный экран", "全屏"]),
     ("sc.mirror", ["mirror typing", "espelhar digitação", "дублировать ввод", "同步输入"]),
+    ("sc.mouse", ["select text while a program uses the mouse", "selecionar texto quando o programa usa o mouse", "выделение текста, когда мышь занята программой", "程序占用鼠标时选择文本"]),
     ("sc.multi", ["open the multiterminal for the selection", "abrir multiterminal da seleção", "открыть мультитерминал для выбранных", "打开所选的多终端"]),
     ("sc.new", ["new worktree", "novo worktree", "новое рабочее дерево", "新建工作树"]),
     ("sc.refresh", ["refresh the list", "atualizar lista", "обновить список", "刷新列表"]),

@@ -1,5 +1,6 @@
 //! Renders a `TerminalSession` and feeds it keyboard/mouse input.
 
+use super::mouse;
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
@@ -122,6 +123,11 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
     let bracketed = mode.contains(TermMode::BRACKETED_PASTE);
     let alt_scroll =
         mode.contains(TermMode::ALT_SCREEN) && mode.contains(TermMode::ALTERNATE_SCROLL);
+    // While a program asks for the mouse it decides what a click or a wheel
+    // notch means — which pane of its own to scroll, which button was hit.
+    // Holding Shift takes the mouse back for selecting text, as everywhere.
+    let shift_held = ui.input(|i| i.modifiers.shift);
+    let reporting = mouse::wanted(mode) && !shift_held;
 
     // ---- mouse -------------------------------------------------------------
     let to_point = |pos: Pos2, display_offset: usize| -> (Point, Side) {
@@ -141,7 +147,9 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
     };
 
     let display_offset = guard.grid().display_offset();
-    if let Some(pos) = response.interact_pointer_pos() {
+    if let Some(pos) = response.interact_pointer_pos()
+        && !reporting
+    {
         let (point, side) = to_point(pos, display_offset);
         if response.triple_clicked() {
             guard.selection = Some(Selection::new(SelectionType::Lines, point, side));
@@ -171,6 +179,7 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
     // A selection dragged past the top or the bottom pulls the scrollback along.
     if response.dragged()
         && session.selecting
+        && !reporting
         && let Some(pos) = response.interact_pointer_pos()
     {
         let step = if pos.y < inner.min.y {
@@ -216,6 +225,75 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
         }
     }
 
+    // ---- the mouse, when a program asked for it ----------------------------
+    let cell_at = |pos: Pos2| -> (usize, usize) {
+        let col = ((pos.x - inner.min.x) / cell_w).floor().max(0.0) as usize;
+        let row = ((pos.y - inner.min.y) / cell_h).floor().max(0.0) as usize;
+        (col.min(cols - 1) + 1, row.min(rows - 1) + 1)
+    };
+    if reporting {
+        let mods = mouse::Mods {
+            shift: false,
+            alt: ui.input(|i| i.modifiers.alt),
+            ctrl: ui.input(|i| i.modifiers.command),
+        };
+        let pointer = ui.input(|i| i.pointer.latest_pos());
+        let held = ui.input(|i| i.pointer.any_down());
+
+        for (egui_button, button) in [
+            (egui::PointerButton::Primary, mouse::Button::Left),
+            (egui::PointerButton::Middle, mouse::Button::Middle),
+            (egui::PointerButton::Secondary, mouse::Button::Right),
+        ] {
+            let pressed = ui.input(|i| i.pointer.button_pressed(egui_button));
+            let released = ui.input(|i| i.pointer.button_released(egui_button));
+            if !(pressed || released) {
+                continue;
+            }
+            // A press counts only over this pane; a release is sent wherever
+            // the pointer ended up, so the program never waits for one.
+            let Some(pos) = pointer else { continue };
+            if pressed && !rect.contains(pos) {
+                continue;
+            }
+            let (col, row) = cell_at(pos);
+            let kind = if pressed {
+                mouse::Kind::Press
+            } else {
+                mouse::Kind::Release
+            };
+            if let Some(bytes) = mouse::report(mode, button, kind, col, row, mods) {
+                pending.extend_from_slice(&bytes);
+            }
+        }
+
+        // Moving inside the pane: only worth a word when the cell changes.
+        let cell = pointer
+            .filter(|pos| rect.contains(*pos) || held)
+            .map(cell_at);
+        if cell != session.mouse_cell {
+            if let Some((col, row)) = cell {
+                let button = if ui.input(|i| i.pointer.button_down(egui::PointerButton::Primary)) {
+                    mouse::Button::Left
+                } else if ui.input(|i| i.pointer.button_down(egui::PointerButton::Secondary)) {
+                    mouse::Button::Right
+                } else if ui.input(|i| i.pointer.button_down(egui::PointerButton::Middle)) {
+                    mouse::Button::Middle
+                } else {
+                    mouse::Button::None
+                };
+                if let Some(bytes) =
+                    mouse::report(mode, button, mouse::Kind::Motion, col, row, mods)
+                {
+                    pending.extend_from_slice(&bytes);
+                }
+            }
+            session.mouse_cell = cell;
+        }
+    } else {
+        session.mouse_cell = None;
+    }
+
     // Ctrl+wheel is a zoom gesture in egui, and never reaches `scroll_delta`.
     let zoom = if response.hovered() {
         ui.input(|i| i.zoom_delta())
@@ -227,8 +305,33 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
         let wheel = ui.input(|i| i.smooth_scroll_delta.y);
         if wheel.abs() > 0.5 {
             let lines = (wheel / cell_h).round() as i32;
-            if lines != 0 {
-                if alt_scroll {
+            // A program that asked for the mouse hears every notch, even the
+            // small ones that are worth less than a line here.
+            let notches = lines.abs().clamp(1, 10);
+            if lines != 0 || reporting {
+                if reporting {
+                    let button = if wheel > 0.0 {
+                        mouse::Button::WheelUp
+                    } else {
+                        mouse::Button::WheelDown
+                    };
+                    let mods = mouse::Mods {
+                        shift: false,
+                        alt: ui.input(|i| i.modifiers.alt),
+                        ctrl: ui.input(|i| i.modifiers.command),
+                    };
+                    let (col, row) = ui
+                        .input(|i| i.pointer.latest_pos())
+                        .map(cell_at)
+                        .unwrap_or((1, 1));
+                    for _ in 0..notches {
+                        if let Some(bytes) =
+                            mouse::report(mode, button, mouse::Kind::Press, col, row, mods)
+                        {
+                            pending.extend_from_slice(&bytes);
+                        }
+                    }
+                } else if alt_scroll {
                     let seq: &[u8] = if lines > 0 {
                         if app_cursor { b"\x1bOA" } else { b"\x1b[A" }
                     } else if app_cursor {

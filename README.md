@@ -37,6 +37,11 @@ Rust · egui · AppImage (Linux) · .exe (Windows)
   com **espelhamento de digitação** para rodar o mesmo comando em todas de uma vez.
 - **Comandos salvos**: até três botões com nome e comando próprios, guardados na
   configuração, que disparam o comando em todos os painéis de uma vez.
+- **Mouse nos programas de tela cheia**: cliques, arrastos e roda são
+  entregues a quem pediu o mouse (`claude`, `htop`, `vim`, `lazygit`…), então o
+  ponteiro vale onde está — rolar sobre a conversa rola a conversa, fechar um
+  painel do programa fecha aquele painel, e as divisões dele dão para arrastar.
+  Segurando **Shift** o mouse volta a ser do terminal, para selecionar texto.
 - **Imagens no terminal**: o painel entende o protocolo gráfico do kitty, então
   `fastfetch --logo-type kitty`, `kitten icat` e companhia desenham a figura no
   meio do texto, e ela rola junto com o histórico. Os painéis ainda ganham um

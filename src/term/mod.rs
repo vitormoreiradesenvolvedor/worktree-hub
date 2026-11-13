@@ -3,6 +3,7 @@
 
 pub mod images;
 pub mod keys;
+pub mod mouse;
 pub mod session;
 pub mod shim;
 pub mod widget;
