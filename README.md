@@ -35,13 +35,16 @@ Rust · egui · AppImage (Linux) · .exe (Windows)
 - **Multiterminal estilo terminator**: marque várias worktrees nos checkboxes e
   abra todas em painéis lado a lado (grade, colunas, linhas, abas ou **livre**),
   com **espelhamento de digitação** para rodar o mesmo comando em todas de uma vez.
-- **Comandos salvos**: até três botões com nome e comando próprios, guardados na
-  configuração, que disparam o comando em todos os painéis de uma vez.
+- **Comandos salvos**: quantos botões você quiser, cada um com nome e comando
+  próprios, guardados na configuração, que disparam o comando em todos os
+  painéis de uma vez.
 - **Mouse nos programas de tela cheia**: cliques, arrastos e roda são
   entregues a quem pediu o mouse (`claude`, `htop`, `vim`, `lazygit`…), então o
   ponteiro vale onde está — rolar sobre a conversa rola a conversa, fechar um
   painel do programa fecha aquele painel, e as divisões dele dão para arrastar.
   Segurando **Shift** o mouse volta a ser do terminal, para selecionar texto.
+  Na borda direita do painel aparece uma **régua de rolagem**: arrastá-la manda
+  uma linha por célula percorrida, que é a precisão que a roda não dá.
 - **Imagens no terminal**: o painel entende o protocolo gráfico do kitty, então
   `fastfetch --logo-type kitty`, `kitten icat` e companhia desenham a figura no
   meio do texto, e ela rola junto com o histórico. Os painéis ainda ganham um
@@ -57,6 +60,9 @@ Rust · egui · AppImage (Linux) · .exe (Windows)
   metade inteira (coluna de altura cheia ou linha de largura cheia). As divisões
   entre painéis são arrastáveis, cada painel tem botão de maximizar e `F11` joga
   tudo em tela cheia.
+- **Acompanha o git sozinho**: um `git checkout`, um commit ou um pull feito
+  dentro de um painel aparece na lista em um segundo — o `HEAD` de cada
+  worktree é lido de tempos em tempos, sem rodar `git` à toa.
 - **Separa o repositório oficial dos worktrees**: a lista tem uma seção para a
   pasta do repositório e outra para os worktrees criados a partir dele, e o
   cabeçalho de cada painel de terminal diz qual é qual.

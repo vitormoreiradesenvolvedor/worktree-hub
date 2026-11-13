@@ -206,6 +206,12 @@ pub struct TerminalSession {
     pub images: SharedAlbum,
     /// Pending selection anchor while the user drags the mouse.
     pub selecting: bool,
+    /// True while a press reported to the program has not been released yet,
+    /// so the release reaches it even if the pointer wandered off.
+    pub mouse_claimed: bool,
+    /// Leftover of a drag on the scroll strip, in pixels, so a slow drag still
+    /// adds up to whole lines.
+    pub bar_rest: f32,
     /// Last cell reported to a program that asked for the mouse, so a move is
     /// only sent when the pointer actually changes cell.
     pub mouse_cell: Option<(usize, usize)>,
@@ -327,6 +333,8 @@ impl TerminalSession {
             exited,
             images,
             selecting: false,
+            mouse_claimed: false,
+            bar_rest: 0.0,
             mouse_cell: None,
             font_size: None,
         })

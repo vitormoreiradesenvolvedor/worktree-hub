@@ -646,15 +646,16 @@ fn drag_splitters(app: &mut App, ui: &mut Ui, area: Rect) {
 /// The saved commands: one button each, sending the command to every pane, plus
 /// a pencil to edit it. The first free slot shows an invitation to fill it.
 fn quick_row(app: &mut App, ui: &mut Ui, actions: &mut Vec<Action>) {
-    let saved: Vec<(usize, String, String)> = (0..config::QUICK_SLOTS)
-        .filter_map(|slot| {
-            app.cfg
-                .settings
-                .quick(slot)
-                .map(|quick| (slot, quick.label.clone(), quick.command.clone()))
-        })
+    let saved: Vec<(usize, String, String)> = app
+        .cfg
+        .settings
+        .quick_all()
+        .into_iter()
+        .map(|(slot, quick)| (slot, quick.label.clone(), quick.command.clone()))
         .collect();
-    let free = (0..config::QUICK_SLOTS).find(|slot| app.cfg.settings.quick(*slot).is_none());
+    // The next button goes after the last one, however many there are.
+    let count = app.cfg.settings.quick_commands.len();
+    let free = (count < config::QUICK_MAX).then_some(count);
 
     ui.add_space(theme::S2);
     ui.horizontal_wrapped(|ui| {

@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::time::{Duration, Instant};
 
 use egui::{Key, KeyboardShortcut, Modifiers, Rect};
 
@@ -213,6 +214,10 @@ pub struct App {
     pub search: String,
     pub loading: bool,
     pub busy: bool,
+    /// What the HEAD files said last time we looked, and when that was: a
+    /// checkout typed in a pane has to show up in the list on its own.
+    heads_seen: String,
+    heads_checked: Instant,
     pub dialog: Dialog,
     /// Decoded application icons, kept so the picker does not read them again
     /// on every frame.
@@ -263,6 +268,8 @@ impl App {
             search: String::new(),
             loading: false,
             busy: false,
+            heads_seen: String::new(),
+            heads_checked: Instant::now(),
             dialog: Dialog::None,
             icons: std::collections::HashMap::new(),
             toasts: Vec::new(),
@@ -397,6 +404,40 @@ impl App {
             let _ = tx.send(message);
             ctx.request_repaint();
         });
+    }
+
+    /// Notices a branch that moved under us — a `git checkout` typed in a pane,
+    /// a commit, a pull — by reading the few files git writes for it. Running
+    /// `git` again every second would be heavy; reading `HEAD` is not.
+    fn watch_heads(&mut self, ctx: &egui::Context) {
+        const EVERY: Duration = Duration::from_millis(1200);
+        // Only while the window is in use: a terminal left open in the
+        // background has nothing to show anybody.
+        if !ctx.input(|i| i.viewport().focused.unwrap_or(true)) {
+            return;
+        }
+        ctx.request_repaint_after(EVERY);
+        if self.loading || self.busy || self.heads_checked.elapsed() < EVERY {
+            return;
+        }
+        self.heads_checked = Instant::now();
+
+        let mut heads = String::new();
+        if let Some(project) = self.current_project() {
+            head_of(&project.root, &mut heads);
+        }
+        for row in &self.rows {
+            head_of(&row.wt.path, &mut heads);
+        }
+        if heads.is_empty() || heads == self.heads_seen {
+            self.heads_seen = heads;
+            return;
+        }
+        let first_look = self.heads_seen.is_empty();
+        self.heads_seen = heads;
+        if !first_look {
+            self.start_refresh(ctx);
+        }
     }
 
     fn poll_jobs(&mut self, ctx: &egui::Context) {
@@ -1051,6 +1092,7 @@ impl App {
     pub fn render(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.poll_jobs(&ctx);
+        self.watch_heads(&ctx);
         ui::components::set_tokens(&ctx, theme::tokens(self.cfg.settings.look()));
 
         let mut actions = self.shortcuts(&ctx);
@@ -1122,6 +1164,50 @@ impl Drop for App {
         }
         let _ = self.cfg.save();
     }
+}
+
+/// Appends what git says this worktree is on: the `HEAD` file, and the commit
+/// the branch it names points at, so a commit counts as a change too.
+fn head_of(path: &Path, out: &mut String) {
+    let dot = path.join(".git");
+    // A worktree's `.git` is a file pointing at the real directory.
+    let git_dir = if dot.is_file() {
+        match std::fs::read_to_string(&dot) {
+            Ok(text) => match text.split_once("gitdir:") {
+                Some((_, rest)) => PathBuf::from(rest.trim()),
+                None => return,
+            },
+            Err(_) => return,
+        }
+    } else {
+        dot
+    };
+    let Ok(head) = std::fs::read_to_string(git_dir.join("HEAD")) else {
+        return;
+    };
+    out.push_str(path.to_string_lossy().as_ref());
+    out.push('=');
+    out.push_str(head.trim());
+    // Branches live in the common directory, which a linked worktree names in
+    // a file of its own.
+    let refs_root = match std::fs::read_to_string(git_dir.join("commondir")) {
+        Ok(rel) => {
+            let rel = rel.trim();
+            if Path::new(rel).is_absolute() {
+                PathBuf::from(rel)
+            } else {
+                git_dir.join(rel)
+            }
+        }
+        Err(_) => git_dir.clone(),
+    };
+    if let Some(reference) = head.trim().strip_prefix("ref:")
+        && let Ok(sha) = std::fs::read_to_string(refs_root.join(reference.trim()))
+    {
+        out.push('@');
+        out.push_str(sha.trim());
+    }
+    out.push('\n');
 }
 
 #[cfg(test)]

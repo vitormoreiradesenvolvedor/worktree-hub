@@ -56,7 +56,8 @@ pub struct Settings {
     pub pane_layout: PaneLayout,
     /// Left rail folded down to icons only.
     pub sidebar_collapsed: bool,
-    /// Up to three commands kept at hand, sent to every pane with one click.
+    /// Commands kept at hand, sent to every pane with one click. As many as
+    /// the user cares to save.
     pub quick_commands: Vec<QuickCommand>,
 }
 
@@ -68,8 +69,9 @@ pub struct QuickCommand {
     pub command: String,
 }
 
-/// How many of them fit in the broadcast bar.
-pub const QUICK_SLOTS: usize = 3;
+/// A ceiling, so a stuck finger on the keyboard cannot fill the bar with
+/// thousands of buttons; the user will never meet it.
+pub const QUICK_MAX: usize = 64;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -104,15 +106,16 @@ impl Settings {
             .filter(|q| !q.command.trim().is_empty())
     }
 
-    /// Writes a slot, growing the list up to [`QUICK_SLOTS`]; an empty command
-    /// clears the slot instead.
+    /// Writes a slot, growing the list to reach it; an empty command clears the
+    /// slot instead, and a cleared tail is dropped so the next button added
+    /// lands right after the last real one.
     pub fn set_quick(&mut self, slot: usize, label: &str, command: &str) {
-        if slot >= QUICK_SLOTS {
+        if slot >= QUICK_MAX {
             return;
         }
-        if self.quick_commands.len() < QUICK_SLOTS {
+        if self.quick_commands.len() <= slot {
             self.quick_commands
-                .resize(QUICK_SLOTS, QuickCommand::default());
+                .resize(slot + 1, QuickCommand::default());
         }
         let label = label.trim();
         let command = command.trim();
@@ -128,6 +131,22 @@ impl Settings {
                 command: command.to_owned(),
             }
         };
+        while self
+            .quick_commands
+            .last()
+            .is_some_and(|q| q.command.trim().is_empty())
+        {
+            self.quick_commands.pop();
+        }
+    }
+
+    /// Every saved command, with the slot each one lives in.
+    pub fn quick_all(&self) -> Vec<(usize, &QuickCommand)> {
+        self.quick_commands
+            .iter()
+            .enumerate()
+            .filter(|(_, q)| !q.command.trim().is_empty())
+            .collect()
     }
 
     pub fn look(&self) -> Look {
@@ -295,12 +314,27 @@ mod tests {
     }
 
     #[test]
-    fn there_is_no_fourth_slot() {
+    fn the_list_grows_with_each_new_button() {
         let mut settings = Settings::default();
-        settings.set_quick(QUICK_SLOTS, "nope", "rm -rf /");
-        assert_eq!(settings.quick_commands.len(), 0);
-        settings.set_quick(2, "last", "echo last");
-        assert_eq!(settings.quick_commands.len(), QUICK_SLOTS);
+        for slot in 0..6 {
+            settings.set_quick(slot, &format!("b{slot}"), &format!("echo {slot}"));
+        }
+        assert_eq!(settings.quick_all().len(), 6);
+        assert_eq!(settings.quick(5).unwrap().command, "echo 5");
+
+        // Absurd slots are refused instead of allocating a huge list.
+        settings.set_quick(QUICK_MAX, "nope", "rm -rf /");
+        assert_eq!(settings.quick_commands.len(), 6);
+    }
+
+    #[test]
+    fn clearing_the_last_button_shrinks_the_list() {
+        let mut settings = Settings::default();
+        settings.set_quick(0, "one", "echo 1");
+        settings.set_quick(1, "two", "echo 2");
+        settings.set_quick(1, "two", "");
+        assert_eq!(settings.quick_commands.len(), 1);
+        assert_eq!(settings.quick_all().len(), 1);
     }
 
     fn project() -> Project {

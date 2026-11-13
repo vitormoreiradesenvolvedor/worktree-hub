@@ -37,6 +37,7 @@ pub struct TermTheme {
 /// (the app mirrors those to the other panes when broadcast is on).
 pub struct TermOutput {
     pub response: Response,
+    /// What the user typed or pasted — the only thing worth mirroring.
     pub sent: Vec<u8>,
     /// Ctrl+wheel over this pane: multiply the font size by this.
     pub zoom: f32,
@@ -114,6 +115,9 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
     );
 
     let mut pending: Vec<u8> = Vec::new();
+    // Mouse reports and scrolling belong to this pane alone: mirroring them
+    // would bombard the other panes with coordinates nobody typed.
+    let mut private: Vec<u8> = Vec::new();
     let mut copy_selection = false;
     let mut paste_clipboard = false;
 
@@ -212,7 +216,45 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
             .max(28.0)
             .min(bar_track.height())
     };
-    if history > 0
+    // A full-screen program keeps its own history, so there is nothing here to
+    // jump to: the strip turns into a wheel instead, a line per cell dragged,
+    // which is the precise scrolling a pointer wheel cannot give.
+    if reporting && history == 0 {
+        if bar.drag_stopped() {
+            session.bar_rest = 0.0;
+        }
+        session.bar_rest += bar.drag_delta().y;
+        let notches = (session.bar_rest / cell_h).trunc();
+        if notches != 0.0 {
+            session.bar_rest -= notches * cell_h;
+            let button = if notches < 0.0 {
+                mouse::Button::WheelUp
+            } else {
+                mouse::Button::WheelDown
+            };
+            let mods = mouse::Mods {
+                shift: false,
+                alt: false,
+                ctrl: false,
+            };
+            // Reported from the middle of the pane: the last column is the
+            // edge of the window and programs tend to drop events there,
+            // while the middle is always inside what they draw.
+            let col = (cols / 2).max(1);
+            let row = bar
+                .interact_pointer_pos()
+                .map(|pos| {
+                    (((pos.y - inner.min.y) / cell_h).floor().max(0.0) as usize).min(rows - 1) + 1
+                })
+                .unwrap_or(rows / 2 + 1);
+            for _ in 0..(notches.abs() as usize).min(20) {
+                if let Some(bytes) = mouse::report(mode, button, mouse::Kind::Press, col, row, mods)
+                {
+                    private.extend_from_slice(&bytes);
+                }
+            }
+        }
+    } else if history > 0
         && (bar.dragged() || bar.clicked())
         && let Some(pos) = bar.interact_pointer_pos()
     {
@@ -239,6 +281,10 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
         };
         let pointer = ui.input(|i| i.pointer.latest_pos());
         let held = ui.input(|i| i.pointer.any_down());
+        // The scroll strip is ours, not the program's: a press there drives the
+        // strip, and only a drag that started over the text keeps reporting
+        // once it wanders onto it.
+        let on_bar = pointer.is_some_and(|pos| bar_hit.contains(pos));
 
         for (egui_button, button) in [
             (egui::PointerButton::Primary, mouse::Button::Left),
@@ -253,9 +299,13 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
             // A press counts only over this pane; a release is sent wherever
             // the pointer ended up, so the program never waits for one.
             let Some(pos) = pointer else { continue };
-            if pressed && !rect.contains(pos) {
+            if pressed && (!rect.contains(pos) || on_bar) {
                 continue;
             }
+            if released && !session.mouse_claimed {
+                continue;
+            }
+            session.mouse_claimed = pressed;
             let (col, row) = cell_at(pos);
             let kind = if pressed {
                 mouse::Kind::Press
@@ -263,13 +313,13 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
                 mouse::Kind::Release
             };
             if let Some(bytes) = mouse::report(mode, button, kind, col, row, mods) {
-                pending.extend_from_slice(&bytes);
+                private.extend_from_slice(&bytes);
             }
         }
 
         // Moving inside the pane: only worth a word when the cell changes.
         let cell = pointer
-            .filter(|pos| rect.contains(*pos) || held)
+            .filter(|pos| (rect.contains(*pos) || held) && (!on_bar || session.mouse_claimed))
             .map(cell_at);
         if cell != session.mouse_cell {
             if let Some((col, row)) = cell {
@@ -285,7 +335,7 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
                 if let Some(bytes) =
                     mouse::report(mode, button, mouse::Kind::Motion, col, row, mods)
                 {
-                    pending.extend_from_slice(&bytes);
+                    private.extend_from_slice(&bytes);
                 }
             }
             session.mouse_cell = cell;
@@ -328,7 +378,7 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
                         if let Some(bytes) =
                             mouse::report(mode, button, mouse::Kind::Press, col, row, mods)
                         {
-                            pending.extend_from_slice(&bytes);
+                            private.extend_from_slice(&bytes);
                         }
                     }
                 } else if alt_scroll {
@@ -340,7 +390,7 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
                         b"\x1b[B"
                     };
                     for _ in 0..lines.abs().min(10) {
-                        pending.extend_from_slice(seq);
+                        private.extend_from_slice(seq);
                     }
                 } else {
                     guard.scroll_display(Scroll::Delta(lines));
@@ -574,6 +624,30 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
         }
     }
 
+    // Scroll strip for a program that owns the mouse: no position to show, so
+    // the handle sits in the middle and is only there to be dragged.
+    if reporting && history == 0 {
+        let lit = bar.hovered() || bar.dragged();
+        painter.rect_filled(
+            bar_track,
+            CornerRadius::same(2),
+            t.fg.gamma_multiply(if lit { 0.22 } else { 0.08 }),
+        );
+        let handle = Rect::from_center_size(
+            Pos2::new(bar_track.center().x, bar_track.center().y),
+            Vec2::new(bar_track.width(), 48.0),
+        );
+        painter.rect_filled(
+            handle,
+            CornerRadius::same(2),
+            if lit {
+                t.cursor
+            } else {
+                t.fg.gamma_multiply(0.30)
+            },
+        );
+    }
+
     // Scrollbar: there whenever there is history, grabbable with the mouse.
     if history > 0 {
         let lit = bar.hovered() || bar.dragged();
@@ -603,6 +677,9 @@ pub fn show_terminal(ui: &mut Ui, session: &mut TerminalSession, t: &TermTheme) 
 
     if !pending.is_empty() {
         session.write(&pending);
+    }
+    if !private.is_empty() {
+        session.write(&private);
     }
 
     TermOutput {
