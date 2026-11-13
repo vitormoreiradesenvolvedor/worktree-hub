@@ -117,8 +117,12 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             );
         }
         Icon::Refresh => {
-            arc(painter, rect.center(), s * 0.34, -0.5, 4.3, stroke);
-            path(vec![p(0.68, 0.06), p(0.86, 0.22), p(0.66, 0.32)]);
+            // Two half turns chasing each other, each with its own head: reads
+            // as "again" at any size, unlike a single arc with a loose tip.
+            arc(painter, rect.center(), s * 0.30, 3.05, 5.95, stroke);
+            path(vec![p(0.80, 0.14), p(0.80, 0.34), p(0.60, 0.33)]);
+            arc(painter, rect.center(), s * 0.30, -0.10, 2.80, stroke);
+            path(vec![p(0.20, 0.86), p(0.20, 0.66), p(0.40, 0.67)]);
         }
         Icon::Search => {
             painter.circle_stroke(p(0.44, 0.44), s * 0.26, stroke);

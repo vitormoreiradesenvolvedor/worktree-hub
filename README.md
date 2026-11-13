@@ -28,6 +28,10 @@ Rust · egui · AppImage (Linux) · .exe (Windows)
   branch junto. Também faz `prune` dos registros órfãos e `lock`/`unlock`.
 - **Abre terminal** embutido em qualquer worktree, ou no terminal/editor/gerenciador
   de arquivos do sistema.
+- **Escolhe o editor na hora**: "Abrir editor" mostra os editores e IDEs que o
+  menu de aplicativos do sistema conhece — VS Code, Antigravity, Cursor, Zed,
+  IntelliJ, Kate… — com o ícone de cada um. Dá para marcar "usar sempre este" e
+  ele vira o comando salvo em Ajustes.
 - **Multiterminal estilo terminator**: marque várias worktrees nos checkboxes e
   abra todas em painéis lado a lado (grade, colunas, linhas, abas ou **livre**),
   com **espelhamento de digitação** para rodar o mesmo comando em todas de uma vez.
@@ -35,7 +39,13 @@ Rust · egui · AppImage (Linux) · .exe (Windows)
   configuração, que disparam o comando em todos os painéis de uma vez.
 - **Imagens no terminal**: o painel entende o protocolo gráfico do kitty, então
   `fastfetch --logo-type kitty`, `kitten icat` e companhia desenham a figura no
-  meio do texto, e ela rola junto com o histórico.
+  meio do texto, e ela rola junto com o histórico. Os painéis ainda ganham um
+  `fastfetch` de atalho no início do `PATH` que já passa `--logo-type kitty`, de
+  modo que a figura aparece sem argumento nenhum — nos outros terminais nada
+  muda, porque o atalho só existe dentro do Worktree Hub. Quando o shell é o
+  bash, o painel o inicia com um `--rcfile` que carrega o seu `~/.bashrc` e só
+  então recoloca o atalho na frente do `PATH`, porque arquivos de inicialização
+  costumam reconstruir o `PATH` do zero.
 - **Layout livre com encaixe**: arraste o cabeçalho de um painel sobre outro e
   solte na borda onde ele deve entrar — os vizinhos se reacomodam sozinhos e a
   área nunca fica com buraco. Soltando perto da borda da área, o painel ocupa
@@ -45,6 +55,10 @@ Rust · egui · AppImage (Linux) · .exe (Windows)
 - **Separa o repositório oficial dos worktrees**: a lista tem uma seção para a
   pasta do repositório e outra para os worktrees criados a partir dele, e o
   cabeçalho de cada painel de terminal diz qual é qual.
+- **Ajustes com prévia**: em telas largas a tela de ajustes ganha uma segunda
+  coluna com uma maquete que mostra na hora a cor de destaque, as fontes e as
+  duas transparências, além dos atalhos e de onde ficam os arquivos desta
+  instalação.
 - **Se ajusta a você**: cinco cores de destaque (verde pedra, cinza, azul escuro,
   amarelo, roxo), tema claro/escuro, quatro fontes de interface e cinco de
   terminal, tamanho da interface, transparência da janela e **transparência real
@@ -145,7 +159,7 @@ Sem Electron, sem webview: um binário só.
 ## Desenvolvimento
 
 ```bash
-cargo test            # 94 testes: parsing do git, atalhos de terminal, imagens, tiling, i18n, UI headless
+cargo test            # 101 testes: parsing do git, atalhos de terminal, imagens, menu de apps, tiling, i18n, UI headless
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all
 ```

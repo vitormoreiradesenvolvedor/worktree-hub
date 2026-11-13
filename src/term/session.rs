@@ -167,6 +167,10 @@ pub struct SpawnSpec<'a> {
     /// Worktree folder name, shown in the pane header.
     pub label: String,
     pub branch: String,
+    /// Name of the project this worktree belongs to, shown in the pane header.
+    pub project: String,
+    /// Id of that project, so the sidebar can follow the focused pane.
+    pub project_id: Option<u64>,
     /// True when this folder is the repository itself, not a worktree of it.
     pub is_main: bool,
     pub cwd: &'a Path,
@@ -180,6 +184,10 @@ pub struct TerminalSession {
     /// Worktree name, shown in the pane header.
     pub label: String,
     pub branch: String,
+    /// Project this pane belongs to.
+    pub project: String,
+    /// Id of that project, so the sidebar can follow the focused pane.
+    pub project_id: Option<u64>,
     /// True when this folder is the repository itself, not a worktree of it.
     pub is_main: bool,
     pub cwd: PathBuf,
@@ -208,6 +216,8 @@ impl TerminalSession {
             id,
             label,
             branch,
+            project,
+            project_id,
             is_main,
             cwd,
             shell,
@@ -226,12 +236,23 @@ impl TerminalSession {
             .context("não foi possível abrir um PTY")?;
 
         let mut cmd = CommandBuilder::new(shell);
+        // Some shells let us run a file of ours after the user's own startup
+        // files, which is the only way to keep our wrappers at the front of
+        // `PATH` when a startup file rebuilds it.
+        for arg in super::shim::shell_args(shell) {
+            cmd.arg(arg);
+        }
         cmd.cwd(cwd);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "worktree-hub");
         cmd.env("WORKTREE_HUB", "1");
         cmd.env("WORKTREE_HUB_BRANCH", &branch);
+        // Programs that draw pictures look at who started them; the wrappers
+        // tell the few that cannot tell what this terminal can do.
+        if let Some(path) = super::shim::path() {
+            cmd.env("PATH", path);
+        }
 
         let child = pair
             .slave
@@ -286,6 +307,8 @@ impl TerminalSession {
             id,
             label,
             branch,
+            project,
+            project_id,
             is_main,
             cwd: cwd.to_path_buf(),
             term,

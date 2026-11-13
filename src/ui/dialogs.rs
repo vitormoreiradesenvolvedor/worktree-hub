@@ -5,7 +5,7 @@ use egui::{Align, Layout, Modal, Ui};
 use super::components::{self as c, tokens};
 use super::icons::Icon;
 use super::picker;
-use crate::app::{Action, App, Dialog};
+use crate::app::{Action, App, Dialog, EditorPick};
 use crate::config;
 use crate::git::AddOptions;
 use crate::i18n::{tr, tr1};
@@ -13,6 +13,18 @@ use crate::theme::{self, Weight};
 
 pub fn show(app: &mut App, ctx: &egui::Context, actions: &mut Vec<Action>) {
     if !app.dialog.is_open() {
+        return;
+    }
+
+    // The editor picker reads the icon cache while it draws, so it takes the
+    // dialog out of the app for the duration and puts it back if it stays open.
+    if matches!(app.dialog, Dialog::Editor(_)) {
+        let Dialog::Editor(mut pick) = std::mem::replace(&mut app.dialog, Dialog::None) else {
+            unreachable!()
+        };
+        if editor_picker(app, ctx, &mut pick, actions) {
+            app.dialog = Dialog::Editor(pick);
+        }
         return;
     }
 
@@ -355,6 +367,8 @@ pub fn show(app: &mut App, ctx: &egui::Context, actions: &mut Vec<Action>) {
                 });
             }
 
+            Dialog::Editor(_) => {}
+
             Dialog::None => {}
         }
     });
@@ -362,6 +376,186 @@ pub fn show(app: &mut App, ctx: &egui::Context, actions: &mut Vec<Action>) {
     if close_requested || response.should_close() {
         actions.push(Action::CancelDialog);
     }
+}
+
+/// Menu of the editors the desktop knows about. Returns true while it is still
+/// open.
+fn editor_picker(
+    app: &mut App,
+    ctx: &egui::Context,
+    pick: &mut EditorPick,
+    actions: &mut Vec<Action>,
+) -> bool {
+    let tokens = theme::tokens(app.cfg.settings.look());
+    let frame = egui::Frame::new()
+        .fill(tokens.surface)
+        .stroke(egui::Stroke::new(1.0, tokens.border))
+        .corner_radius(egui::CornerRadius::same(theme::R_CARD))
+        .shadow(theme::card_shadow(tokens))
+        .inner_margin(egui::Margin::same(theme::S5 as i8));
+
+    let mut chosen: Option<usize> = None;
+    let mut close = false;
+
+    let response = Modal::new(egui::Id::unique("worktree-hub-editor"))
+        .frame(frame)
+        .show(ctx, |ui| {
+            let room = ctx.viewport_rect().width() - 4.0 * theme::S5;
+            ui.set_width(600.0_f32.min(room.max(320.0)));
+            title(ui, tr("dlg.editor_title"), tr("dlg.editor_sub"));
+            ui.add_space(theme::S2);
+            c::truncated(
+                ui,
+                &pick.path.to_string_lossy(),
+                11.5,
+                Weight::Regular,
+                tokens.text_faint,
+                ui.available_width(),
+            );
+            ui.add_space(theme::S4);
+
+            let height = ctx.viewport_rect().height() * 0.45;
+            egui::ScrollArea::vertical()
+                .max_height(height.clamp(180.0, 420.0))
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        for (index, editor) in pick.apps.iter().enumerate() {
+                            let texture = editor
+                                .icon
+                                .clone()
+                                .and_then(|path| icon_texture(ctx, &mut app.icons, &path));
+                            if tile(ui, &editor.name, &editor.initials(), texture).clicked() {
+                                chosen = Some(index);
+                            }
+                        }
+                    });
+                });
+
+            ui.add_space(theme::S3);
+            c::toggle_row(
+                ui,
+                tr("dlg.editor_remember"),
+                tr("dlg.editor_remember_hint"),
+                &mut pick.remember,
+            );
+
+            ui.add_space(theme::S3);
+            ui.horizontal(|ui| {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if c::Btn::ghost(tr("dlg.cancel")).show(ui).clicked() {
+                        close = true;
+                    }
+                });
+            });
+        });
+
+    if let Some(index) = chosen {
+        actions.push(Action::OpenEditorWith {
+            path: pick.path.clone(),
+            app: pick.apps[index].clone(),
+            remember: pick.remember,
+        });
+        return false;
+    }
+    if close || response.should_close() {
+        return false;
+    }
+    true
+}
+
+/// One application in the menu: its picture over its name.
+fn tile(
+    ui: &mut Ui,
+    name: &str,
+    initials: &str,
+    texture: Option<egui::TextureHandle>,
+) -> egui::Response {
+    const W: f32 = 168.0;
+    const H: f32 = 104.0;
+    let t = tokens(ui);
+
+    let (rect, response) = ui.allocate_exact_size(egui::Vec2::new(W, H), egui::Sense::click());
+    let hovered = response.hovered();
+    let painter = ui.painter();
+    if hovered {
+        painter.rect_filled(
+            rect,
+            egui::CornerRadius::same(theme::R_INPUT),
+            t.surface_hover,
+        );
+        painter.rect_stroke(
+            rect,
+            egui::CornerRadius::same(theme::R_INPUT),
+            egui::Stroke::new(1.0, t.brand),
+            egui::StrokeKind::Inside,
+        );
+    }
+
+    let art = egui::Rect::from_center_size(
+        egui::Pos2::new(rect.center().x, rect.top() + 34.0),
+        egui::Vec2::splat(40.0),
+    );
+    match texture {
+        Some(texture) => {
+            painter.image(
+                texture.id(),
+                art,
+                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+        None => {
+            painter.circle_filled(art.center(), 20.0, t.brand_tint);
+            painter.text(
+                art.center(),
+                egui::Align2::CENTER_CENTER,
+                initials,
+                theme::font(15.0, Weight::SemiBold),
+                t.brand,
+            );
+        }
+    }
+
+    // Two lines at most, centred under the picture.
+    let galley = painter.layout(
+        name.to_owned(),
+        theme::font(12.5, Weight::Medium),
+        if hovered { t.text } else { t.text_dim },
+        W - 2.0 * theme::S2,
+    );
+    let top = rect.top() + 62.0;
+    painter.galley(
+        egui::Pos2::new(rect.center().x - galley.size().x / 2.0, top),
+        galley,
+        t.text,
+    );
+
+    response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(name)
+}
+
+/// Decodes an application icon once and keeps the texture around.
+fn icon_texture(
+    ctx: &egui::Context,
+    cache: &mut std::collections::HashMap<std::path::PathBuf, Option<egui::TextureHandle>>,
+    path: &std::path::Path,
+) -> Option<egui::TextureHandle> {
+    if let Some(found) = cache.get(path) {
+        return found.clone();
+    }
+    let loaded = std::fs::read(path)
+        .ok()
+        .and_then(|bytes| image::load_from_memory(&bytes).ok())
+        .map(|picture| {
+            let rgba = picture.to_rgba8();
+            let size = [rgba.width() as usize, rgba.height() as usize];
+            let image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+            ctx.load_texture("app-icon", image, egui::TextureOptions::LINEAR)
+        });
+    cache.insert(path.to_path_buf(), loaded.clone());
+    loaded
 }
 
 fn title(ui: &mut Ui, heading: &str, subtitle: &str) {

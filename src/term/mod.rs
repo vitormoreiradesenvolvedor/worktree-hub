@@ -4,6 +4,7 @@
 pub mod images;
 pub mod keys;
 pub mod session;
+pub mod shim;
 pub mod widget;
 
 pub use session::{SpawnSpec, TermSize, TerminalSession};

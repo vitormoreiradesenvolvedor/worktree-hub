@@ -192,7 +192,14 @@ pub fn show(app: &mut App, ui: &mut Ui, actions: &mut Vec<Action>) {
             for index in 0..count {
                 let session = &app.sessions[index];
                 let selected = index == app.active_tab.min(count - 1);
-                let label = format!("{} · {}", session.label, session.branch);
+                let label = if session.project.is_empty() || session.project == session.label {
+                    format!("{} · {}", session.label, session.branch)
+                } else {
+                    format!(
+                        "{} / {} · {}",
+                        session.project, session.label, session.branch
+                    )
+                };
                 let font = theme::font(12.5, Weight::SemiBold);
                 let galley = ui
                     .painter()
@@ -290,6 +297,7 @@ pub fn show(app: &mut App, ui: &mut Ui, actions: &mut Vec<Action>) {
         let cwd = session.cwd.to_string_lossy().into_owned();
         let label = session.label.clone();
         let branch = session.branch.clone();
+        let project = session.project.clone();
         let is_main = session.is_main;
 
         let font_size = session.font_size.unwrap_or(default_font_size);
@@ -379,6 +387,11 @@ pub fn show(app: &mut App, ui: &mut Ui, actions: &mut Vec<Action>) {
             x += name_w + theme::S2;
 
             let mut chips: Vec<(String, Color32, Color32)> = Vec::new();
+            // Which project this pane belongs to comes first: with panes from
+            // more than one repository open, that is what tells them apart.
+            if !project.is_empty() && project != label {
+                chips.push((project.clone(), t.text_dim, t.surface_alt));
+            }
             if is_main {
                 chips.push((tr("wt.chip_official").to_owned(), t.brand, t.brand_tint));
             }

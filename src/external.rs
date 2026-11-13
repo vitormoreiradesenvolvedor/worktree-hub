@@ -181,6 +181,17 @@ pub fn open_editor(path: &Path, custom: &str) -> Result<()> {
     bail!("nenhum editor encontrado — defina um em Ajustes")
 }
 
+/// Starts a program the user picked from the desktop menu, with the worktree
+/// as its argument and its working directory.
+pub fn open_with(exec: &[String], path: &Path) -> Result<()> {
+    let (program, args) = exec
+        .split_first()
+        .ok_or_else(|| anyhow!("aplicativo sem comando"))?;
+    let mut args = args.to_vec();
+    args.push(path.to_string_lossy().into_owned());
+    spawn(program, &args, path)
+}
+
 pub fn open_folder(path: &Path) -> Result<()> {
     let program = if cfg!(target_os = "windows") {
         "explorer"

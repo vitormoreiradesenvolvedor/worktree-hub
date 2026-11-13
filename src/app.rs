@@ -111,6 +111,14 @@ pub struct DeleteForm {
     pub also_branch: bool,
 }
 
+/// Choosing which editor opens a worktree.
+pub struct EditorPick {
+    pub path: PathBuf,
+    pub apps: Vec<crate::apps::DesktopApp>,
+    /// Save the pick as the editor from now on.
+    pub remember: bool,
+}
+
 /// Editing one of the saved broadcast buttons.
 pub struct QuickForm {
     pub slot: usize,
@@ -125,6 +133,7 @@ pub enum Dialog {
     Delete(DeleteForm),
     RemoveProject(u64),
     Quick(QuickForm),
+    Editor(EditorPick),
 }
 
 impl Dialog {
@@ -151,6 +160,12 @@ pub enum Action {
     OpenTerminal(PathBuf),
     ExternalTerminal(PathBuf),
     OpenEditor(PathBuf),
+    /// Opens the worktree in the app the user picked from the menu.
+    OpenEditorWith {
+        path: PathBuf,
+        app: crate::apps::DesktopApp,
+        remember: bool,
+    },
     OpenFolder(PathBuf),
     CopyPath(PathBuf),
     ToggleLock(PathBuf, bool),
@@ -199,6 +214,9 @@ pub struct App {
     pub loading: bool,
     pub busy: bool,
     pub dialog: Dialog,
+    /// Decoded application icons, kept so the picker does not read them again
+    /// on every frame.
+    pub icons: std::collections::HashMap<PathBuf, Option<egui::TextureHandle>>,
     pub toasts: Vec<Toast>,
     pub sessions: Vec<TerminalSession>,
     pub focused_pane: usize,
@@ -246,6 +264,7 @@ impl App {
             loading: false,
             busy: false,
             dialog: Dialog::None,
+            icons: std::collections::HashMap::new(),
             toasts: Vec::new(),
             sessions: Vec::new(),
             focused_pane: 0,
@@ -454,11 +473,31 @@ impl App {
             .map(|r| r.wt.is_main)
             .unwrap_or_else(|| self.current_project().is_some_and(|p| p.root == path));
 
+        // Which project this folder belongs to: the one whose repository is
+        // this very path, or the one it was created from.
+        let owner = self
+            .cfg
+            .projects
+            .iter()
+            .find(|project| path == project.root || path.starts_with(&project.root))
+            .or_else(|| {
+                self.cfg
+                    .projects
+                    .iter()
+                    .find(|project| Some(project.id) == self.cfg.last_project)
+            })
+            .map(|project| (project.id, project.name.clone()));
+
         let shell = self.cfg.shell();
         let spec = SpawnSpec {
             id: self.next_session_id,
             label,
             branch,
+            project: owner
+                .as_ref()
+                .map(|(_, name)| name.clone())
+                .unwrap_or_default(),
+            project_id: owner.as_ref().map(|(id, _)| *id),
             is_main,
             cwd: path,
             shell: &shell,
@@ -471,9 +510,27 @@ impl App {
                 self.sessions.push(session);
                 self.focused_pane = self.sessions.len() - 1;
                 self.active_tab = self.focused_pane;
+                // The sidebar follows the pane: a terminal always says which
+                // project it came from.
+                if let Some((id, _)) = owner {
+                    self.select_project(ctx, id);
+                }
             }
             Err(err) => self.toast(format!("{err}"), ToastKind::Error),
         }
+    }
+
+    /// Makes that project the current one, reloading its worktrees.
+    fn select_project(&mut self, ctx: &egui::Context, id: u64) {
+        if self.cfg.last_project == Some(id) {
+            return;
+        }
+        self.cfg.last_project = Some(id);
+        self.selected.clear();
+        self.rows.clear();
+        self.search.clear();
+        let _ = self.cfg.save();
+        self.start_refresh(ctx);
     }
 
     fn close_session(&mut self, id: u64) {
@@ -498,14 +555,7 @@ impl App {
         match action {
             Action::SetScreen(screen) => self.screen = screen,
             Action::SelectProject(id) => {
-                if self.cfg.last_project != Some(id) {
-                    self.cfg.last_project = Some(id);
-                    self.selected.clear();
-                    self.rows.clear();
-                    self.search.clear();
-                    let _ = self.cfg.save();
-                    self.start_refresh(ctx);
-                }
+                self.select_project(ctx, id);
                 self.screen = Screen::Worktrees;
             }
             Action::AddProjectDialog => {
@@ -589,7 +639,37 @@ impl App {
                 }
             }
             Action::OpenEditor(path) => {
-                if let Err(err) = external::open_editor(&path, &self.cfg.settings.editor_cmd) {
+                // A command set by hand in the settings wins; otherwise the
+                // desktop's own editors are offered, so the choice can change
+                // from one worktree to the next.
+                if !self.cfg.settings.editor_cmd.trim().is_empty() {
+                    if let Err(err) = external::open_editor(&path, &self.cfg.settings.editor_cmd) {
+                        self.toast(format!("{err}"), ToastKind::Error);
+                    }
+                    return;
+                }
+                let apps = crate::apps::editors();
+                if apps.is_empty() {
+                    self.toast(tr("dlg.editor_none"), ToastKind::Error);
+                    return;
+                }
+                self.dialog = Dialog::Editor(EditorPick {
+                    path,
+                    apps,
+                    remember: false,
+                });
+            }
+            Action::OpenEditorWith {
+                path,
+                app,
+                remember,
+            } => {
+                self.dialog = Dialog::None;
+                if remember {
+                    self.cfg.settings.editor_cmd = app.template();
+                    let _ = self.cfg.save();
+                }
+                if let Err(err) = external::open_with(&app.exec, &path) {
                     self.toast(format!("{err}"), ToastKind::Error);
                 }
             }
@@ -652,6 +732,11 @@ impl App {
             Action::FocusPane(index) => {
                 self.focused_pane = index;
                 self.active_tab = index;
+                // The sidebar follows the pane in use, so the project a
+                // terminal belongs to is never in doubt.
+                if let Some(id) = self.sessions.get(index).and_then(|s| s.project_id) {
+                    self.select_project(ctx, id);
+                }
             }
             Action::Broadcast(line) => {
                 let mut bytes = line.into_bytes();

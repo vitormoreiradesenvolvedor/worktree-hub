@@ -4,6 +4,7 @@
 //! headlessly from integration tests.
 
 pub mod app;
+pub mod apps;
 pub mod config;
 pub mod external;
 pub mod git;
