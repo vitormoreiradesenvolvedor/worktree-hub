@@ -43,10 +43,33 @@ Rust · egui · AppImage (Linux) · .exe (Windows)
   ponteiro vale onde está — rolar sobre a conversa rola a conversa, fechar um
   painel do programa fecha aquele painel, e as divisões dele dão para arrastar.
   Segurando **Shift** o mouse volta a ser do terminal, para selecionar texto.
-  Na borda direita do painel aparece uma **régua de rolagem**: a alça anda
-  exatamente com o ponteiro e o texto anda junto, uma linha por linha
-  arrastada — o painel mede quantas linhas aquele programa move por entalhe da
-  roda (1 no `less`, 3 no vim) e acerta o passo sozinho.
+  A roda livre anda **metade** do gesto da mão — o que sobra de pixel espera a
+  vez em vez de ser arredondado fora, então volta devagar ainda conta.
+  Com **Alt** a roda desce ao passo mais fino que existe — um entalhe por
+  volta da roda, sem acumular —, que é o jeito de andar devagar num programa
+  de conversa (`claude` e parecidos), que pula um bloco de texto por entalhe.
+  Esses programas redesenham a tela inteira e não dizem onde a vista está, por
+  isso ali não aparece régua nenhuma: a roda é o caminho.
+  Nos demais, na borda direita do painel aparece uma **régua de rolagem** que representa o
+  histórico do programa de ponta a ponta: um arrasto só da alça vai do começo
+  ao fim, e a alça fica do tamanho do pedaço que está na tela — nunca menor do
+  que dá para pegar com o mouse, e sempre dentro das bordas do painel. Como
+  esses programas nunca dizem quanto histórico têm, o painel descobre sozinho:
+  mede quantas linhas cada entalhe da roda move (1 no `less`, 3 no vim), manda
+  os entalhes no ritmo em que o programa consegue desenhar e marca as pontas
+  na primeira vez em que ele se recusa a andar — segurar a alça encostada na
+  ponta da régua alcança cada vez mais longe até achar o fim. A alça fica
+  colada no ponteiro durante o arrasto, para não brigar com as respostas que
+  chegam atrasadas. Com **Ctrl** a régua volta ao passo fino, uma linha de
+  texto por linha de ponteiro arrastada. Em históricos muito longos (dezenas
+  de milhares de linhas) as pontas são exatas e o meio é aproximado, porque
+  nada no terminal diz onde o programa está de verdade. E ela não começa do
+  zero: pergunta ao sistema qual programa está no comando do painel (o líder
+  do grupo em primeiro plano do terminal) e já sabe o que esperar — `less` e
+  `man` andam uma linha por entalhe e abrem no começo do texto, `vim` e
+  `nvim` andam três, `claude` e parecidos andam de bloco em bloco e abrem na
+  linha mais nova. Programa que ela não conhece continua sendo aprendido na
+  tentativa.
 - **Imagens no terminal**: o painel entende o protocolo gráfico do kitty, então
   `fastfetch --logo-type kitty`, `kitten icat` e companhia desenham a figura no
   meio do texto, e ela rola junto com o histórico. Os painéis ainda ganham um
@@ -172,7 +195,7 @@ Sem Electron, sem webview: um binário só.
 ## Desenvolvimento
 
 ```bash
-cargo test            # 101 testes: parsing do git, atalhos de terminal, imagens, menu de apps, tiling, i18n, UI headless
+cargo test            # 125 testes: parsing do git, atalhos de terminal, imagens, menu de apps, tiling, i18n, UI headless
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all
 ```

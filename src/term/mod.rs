@@ -6,6 +6,7 @@ pub mod keys;
 pub mod mouse;
 pub mod session;
 pub mod shim;
+pub mod strip;
 pub mod widget;
 
 pub use session::{SpawnSpec, TermSize, TerminalSession};

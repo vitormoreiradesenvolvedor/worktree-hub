@@ -296,6 +296,8 @@ fn aside(app: &mut App, ui: &mut Ui, actions: &mut Vec<Action>) {
             ("Ctrl+Shift+↑ ↓", tr("sc.scroll")),
             ("Ctrl + scroll", tr("sc.font")),
             ("Shift + mouse", tr("sc.mouse")),
+            ("Alt + scroll", tr("sc.fine")),
+            ("Ctrl + drag", tr("sc.ruler")),
             ("Ctrl+1 / 2 / 3", tr("sc.screens")),
         ] {
             ui.horizontal(|ui| {

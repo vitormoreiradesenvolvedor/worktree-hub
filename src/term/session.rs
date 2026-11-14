@@ -9,9 +9,12 @@ use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::{Config as TermConfig, Term};
 use alacritty_terminal::vte::ansi::{Processor, Rgb, StdSyncHandler};
 use anyhow::{Context as _, Result};
+use std::time::{Duration, Instant};
+
 use portable_pty::{Child, ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 use super::images::{Album, Piece, Scanner, SharedAlbum};
+use super::strip::ScrollTrack;
 
 /// Terminal dimensions in cells.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -179,14 +182,6 @@ pub struct SpawnSpec<'a> {
     pub size: TermSize,
 }
 
-/// What the screen looked like before a notch was sent, so the answer can be
-/// measured against it.
-pub struct ScrollProbe {
-    pub before: Vec<u64>,
-    pub notches: i32,
-    pub frames: u8,
-}
-
 pub struct TerminalSession {
     pub id: u64,
     /// Worktree name, shown in the pane header.
@@ -212,28 +207,27 @@ pub struct TerminalSession {
     exited: Arc<AtomicBool>,
     /// Pictures programs have drawn over this pane's grid.
     pub images: SharedAlbum,
+    /// Program in charge of the pane the last time it was asked, and when.
+    running: Option<String>,
+    asked: Instant,
     /// Pending selection anchor while the user drags the mouse.
     pub selecting: bool,
     /// True while a press reported to the program has not been released yet,
     /// so the release reaches it even if the pointer wandered off.
     pub mouse_claimed: bool,
-    /// Hash of each visible row, kept from the last frame so the strip can see
-    /// how far a program scrolled when it was told to.
-    pub rows_hash: Vec<u64>,
-    /// A drag of the strip waiting to find out what it caused.
-    pub scroll_probe: Option<ScrollProbe>,
-    /// How many lines this program moves for one notch of the wheel. Measured
-    /// while dragging, because every program picks its own number.
-    pub scroll_gain: f32,
-    /// Where the handle of the scroll strip sits while it is being dragged, so
-    /// it stays under the pointer instead of hanging in the middle.
-    pub bar_grab: Option<f32>,
-    /// Leftover of a drag on the scroll strip, in pixels, so a slow drag still
-    /// adds up to whole lines.
-    pub bar_rest: f32,
+    /// What the scroll strip has worked out about the program's own history:
+    /// how far a notch goes, where the view stands and where the ends are.
+    pub scroll: ScrollTrack,
     /// Last cell reported to a program that asked for the mouse, so a move is
     /// only sent when the pointer actually changes cell.
     pub mouse_cell: Option<(usize, usize)>,
+    /// Wheel pixels not yet worth a notch. The free wheel moves at half the
+    /// pace of the gesture, and what is left over waits here instead of being
+    /// rounded away.
+    pub drift: f32,
+    /// When the last Alt notch was sent: holding Alt lets one notch through at
+    /// a time, so a program that jumps a block per notch can be crept through.
+    pub creep: Instant,
     /// Font size for this pane alone, set with Ctrl+wheel.
     pub font_size: Option<f32>,
 }
@@ -351,14 +345,14 @@ impl TerminalSession {
             bell,
             exited,
             images,
+            running: None,
+            asked: Instant::now() - Duration::from_secs(1),
             selecting: false,
             mouse_claimed: false,
-            rows_hash: Vec::new(),
-            scroll_probe: None,
-            scroll_gain: 1.0,
-            bar_grab: None,
-            bar_rest: 0.0,
+            scroll: ScrollTrack::default(),
             mouse_cell: None,
+            drift: 0.0,
+            creep: Instant::now() - Duration::from_secs(1),
             font_size: None,
         })
     }
@@ -416,6 +410,54 @@ impl TerminalSession {
             out.push(indexed.cell.c);
         }
         out
+    }
+
+    /// Keeps the strip told about which program is in charge: a program that
+    /// takes over the pane brings its own history and its own idea of what a
+    /// notch is worth, so the strip starts clean on each change.
+    pub fn watch_program(&mut self) {
+        if self.asked.elapsed() < Duration::from_millis(500) {
+            return;
+        }
+        self.asked = Instant::now();
+        let Some(now) = self.program().map(Some) else {
+            // A pane between programs says nothing; what the strip already
+            // knows is better than forgetting it for a frame.
+            return;
+        };
+        if now != self.running {
+            self.scroll
+                .taught(now.as_deref().and_then(super::strip::habit_of));
+            self.running = now;
+        }
+    }
+
+    /// Name of the program in charge of this pane right now: the leader of
+    /// the terminal's foreground process group, which is what the kernel
+    /// hands the keyboard to. A shell sitting at its prompt answers with its
+    /// own name; a program the shell started answers with that program's.
+    pub fn program(&self) -> Option<String> {
+        let pid = self.master.process_group_leader()?;
+        let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
+        let comm = comm.trim().to_string();
+        // An interpreter says nothing about what it is running, so the name
+        // of the script it was handed is the honest answer.
+        if matches!(
+            comm.as_str(),
+            "node" | "python3" | "python" | "ruby" | "bun" | "deno"
+        ) {
+            if let Ok(line) = std::fs::read_to_string(format!("/proc/{pid}/cmdline")) {
+                if let Some(script) = line
+                    .split('\0')
+                    .nth(1)
+                    .and_then(|arg| arg.rsplit('/').next())
+                    .filter(|arg| !arg.is_empty() && !arg.starts_with('-'))
+                {
+                    return Some(script.to_string());
+                }
+            }
+        }
+        Some(comm)
     }
 
     pub fn title(&self) -> String {
