@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use worktree_hub::{APP_NAME, app, icon};
+use worktree_hub::{APP_NAME, app, desktop, icon};
 
 fn main() -> eframe::Result {
     // `worktree-hub --dump-icon <file.png> [size]` is used by the packaging
@@ -32,6 +32,10 @@ fn main() -> eframe::Result {
             .collect(),
         None => Vec::new(),
     };
+
+    // An AppImage is installed nowhere, so the desktop has nothing to take the
+    // window icon from until the app says where it lives.
+    desktop::integrate();
 
     let rgba = icon::rgba(256);
     let options = eframe::NativeOptions {

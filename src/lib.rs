@@ -6,6 +6,7 @@
 pub mod app;
 pub mod apps;
 pub mod config;
+pub mod desktop;
 pub mod external;
 pub mod git;
 pub mod i18n;
