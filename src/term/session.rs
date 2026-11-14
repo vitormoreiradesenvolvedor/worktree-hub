@@ -436,6 +436,14 @@ impl TerminalSession {
     /// the terminal's foreground process group, which is what the kernel
     /// hands the keyboard to. A shell sitting at its prompt answers with its
     /// own name; a program the shell started answers with that program's.
+    /// Only unix answers: the process group of a pty and `/proc` are where
+    /// this is written down, and Windows has neither.
+    #[cfg(not(unix))]
+    pub fn program(&self) -> Option<String> {
+        None
+    }
+
+    #[cfg(unix)]
     pub fn program(&self) -> Option<String> {
         let pid = self.master.process_group_leader()?;
         let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
